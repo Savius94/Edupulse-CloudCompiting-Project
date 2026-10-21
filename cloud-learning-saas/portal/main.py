@@ -206,6 +206,13 @@ def orchestrate_tenant_stack(
             "ADMIN_FULL_NAME": admin_name,
         }
     )
+    for proxy_var in [
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "no_proxy"
+    ]:
+        val = os.getenv(proxy_var)
+        if val:
+            env[proxy_var] = val
 
     base_cmd = ["docker", "compose", "-p", slug, "-f", str(compose_path)]
     if action == "up":

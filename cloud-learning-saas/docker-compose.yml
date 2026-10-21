@@ -38,15 +38,31 @@ services:
     restart: unless-stopped
 
   portal-api:
-    build: ./portal
+    build:
+      context: ./portal
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     container_name: saas-portal-api
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://portal_user:portal_password@portal-db:5432/portal_db
-      SUPERADMIN_EMAIL: superadmin@cloudproject.mnbll.fr
-      SUPERADMIN_PASSWORD: SuperSecretPassword123!
-      BASE_DOMAIN: cloudproject.mnbll.fr
-      PUBLIC_PORT: "8000"
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@cloudproject.mnbll.fr}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-SuperSecretPassword123!}
+      BASE_DOMAIN: ${BASE_DOMAIN:-cloudproject.mnbll.fr}
+      PUBLIC_PORT: ${PUBLIC_PORT:-8000}
       TENANT_COMPOSE_PATH: /app/tenant-stack/docker-compose.tenant.yml
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      no_proxy: ${no_proxy:-}
     ports:
       - "8001:8000"
     volumes:

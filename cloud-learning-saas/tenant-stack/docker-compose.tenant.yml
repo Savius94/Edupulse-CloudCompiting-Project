@@ -18,9 +18,20 @@ services:
     restart: unless-stopped
 
   tenant-app:
-    build: .
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     image: edupulse-tenant-app:latest
     container_name: ${TENANT_SLUG}-app
+    env_file:
+      - path: ../.env
+        required: false
     environment:
       DATABASE_URL: postgresql://tenant_user:tenant_password@tenant-db:5432/tenant_db
       TENANT_SLUG: ${TENANT_SLUG}
@@ -30,6 +41,12 @@ services:
       ADMIN_PASSWORD_HASH: "${ADMIN_PASSWORD_HASH}"
       ADMIN_FULL_NAME: "${ADMIN_FULL_NAME:-Administrateur Principal}"
       JWT_SECRET: "${JWT_SECRET:-super-secret-tenant-key}"
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      NO_PROXY: "${NO_PROXY:-}"
+      http_proxy: "${http_proxy:-}"
+      https_proxy: "${https_proxy:-}"
+      no_proxy: "${no_proxy:-}"
     ports:
       - "${TENANT_PORT:-8101}:8000"
     depends_on:
