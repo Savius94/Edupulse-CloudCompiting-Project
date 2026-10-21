@@ -1,0 +1,11 @@
+MDP:
+direction@lycee-moulin.fr  ClientPass123!
+superadmin@cloudproject.mnbll.fr  SuperSecretPassword123!
+
+admin sub:
+yoanminbielle@gmail.com AzerTY123
+profs : Demo123!
+éleve: Demo123!
+
+Todo:
+IA pour les commentaire

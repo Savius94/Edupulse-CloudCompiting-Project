@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduPulse — Plateforme de Réussite et de Suivi Pédagogique</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .gradient-hero {
+      background: radial-gradient(circle at top right, #eef2ff 0%, #f8fafc 45%, #ffffff 100%);
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
+
+  <!-- ================= HEADER COMMERCIAL ================= -->
+  <header class="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      <a href="#" onclick="switchView('landing'); return false;" class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-sm">
+          E
+        </div>
+        <div>
+          <span class="font-bold text-xl tracking-tight text-slate-900">EduPulse</span>
+          <span class="hidden sm:inline-block ml-2 text-xs font-medium px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+            Réussite Étudiante
+          </span>
+        </div>
+      </a>
+
+      <nav id="public-nav" class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
+        <a href="#avantages" class="hover:text-indigo-600 transition">Pourquoi EduPulse ?</a>
+        <a href="#fonctionnement" class="hover:text-indigo-600 transition">Accompagnement</a>
+        <a href="#tarifs" class="hover:text-indigo-600 transition">Nos Offres</a>
+      </nav>
+
+      <div class="flex items-center gap-3">
+        <!-- Zone utilisateur non connecté -->
+        <div id="header-guest" class="flex items-center gap-3">
+          <button onclick="openAuthModal('login')" class="text-sm font-semibold text-slate-700 hover:text-indigo-600 px-3 py-2 transition">
+            Connexion
+          </button>
+          <a href="#tarifs" class="text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl shadow-sm transition">
+            Démarrer maintenant
+          </a>
+        </div>
+
+        <!-- Zone utilisateur connecté -->
+        <div id="header-user" class="hidden items-center gap-3">
+          <span id="user-badge" class="text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-700"></span>
+          <button onclick="logout()" class="text-xs font-semibold text-rose-600 hover:bg-rose-50 px-3 py-2 rounded-lg transition">
+            Déconnexion
+          </button>
+        </div>
+
+        <!-- BOUTON PARAMÈTRES (SIMULATEUR DE COMPTES POUR LE PROJET) -->
+        <div class="relative ml-2">
+          <button onclick="toggleDevMenu()" title="Paramètres de démonstration (Bascule de compte)"
+            class="w-10 h-10 rounded-xl border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-600 transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+
+          <!-- Menu déroulant de bascule rapide -->
+          <div id="dev-menu" class="hidden absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-50">
+            <div class="px-2 py-1.5 border-b border-slate-100 mb-2">
+              <p class="text-xs font-bold uppercase tracking-wider text-slate-400">Mode Démonstration</p>
+              <p class="text-[11px] text-slate-500">Basculer rapidement entre les rôles du projet</p>
+            </div>
+            <div class="space-y-1">
+              <button onclick="quickSwitch('guest')" class="w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-slate-50 flex items-center justify-between">
+                <span>🌐 Visiteur (Page commerciale)</span>
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600">Public</span>
+              </button>
+              <button onclick="quickSwitch('client')" class="w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-indigo-50 text-slate-700 flex items-center justify-between">
+                <span>🏫 Client (Directeur d'école)</span>
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">Abonné</span>
+              </button>
+              <button onclick="quickSwitch('superadmin')" class="w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-amber-50 text-slate-700 flex items-center justify-between">
+                <span>⚡ Super-Admin Global</span>
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Opérateur</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= VUE 1 : VITRINE COMMERCIALE PUBLIQUE ================= -->
+  <main id="view-landing" class="flex-1">
+    <!-- Hero Section -->
+    <section class="gradient-hero pt-16 pb-20 border-b border-slate-200/70">
+      <div class="max-w-5xl mx-auto px-6 text-center">
+        <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 mb-6">
+          ✨ La plateforme dédiée à la réussite de chaque élève
+        </span>
+        <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight mb-6">
+          Détectez le décrochage scolaire <span class="text-indigo-600">avant qu'il ne soit trop tard</span>
+        </h1>
+        <p class="text-lg text-slate-600 max-w-3xl mx-auto mb-10 leading-relaxed">
+          EduPulse centralise les résultats d'apprentissage de votre établissement, identifie automatiquement les élèves en difficulté et propose à vos équipes pédagogiques un plan d'accompagnement personnalisé.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a href="#tarifs" class="px-7 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-md transition">
+            Découvrir nos formules
+          </a>
+          <button onclick="openContactModal()" class="px-7 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-semibold border border-slate-300 transition">
+            Demander une présentation
+          </button>
+        </div>
+
+        <!-- Chiffres clés commerciaux -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-14 pt-10 border-t border-slate-200/80 text-left">
+          <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+            <p class="text-3xl font-extrabold text-indigo-600 mb-1">-38%</p>
+            <p class="text-sm font-semibold text-slate-800">de décrochage non détecté</p>
+            <p class="text-xs text-slate-500 mt-1">Grâce aux alertes précoces transmises aux enseignants dès les premiers signes de baisse.</p>
+          </div>
+          <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+            <p class="text-3xl font-extrabold text-indigo-600 mb-1">100%</p>
+            <p class="text-sm font-semibold text-slate-800">Espace dédié à votre école</p>
+            <p class="text-xs text-slate-500 mt-1">Votre établissement dispose de son propre portail web personnalisé et sécurisé.</p>
+          </div>
+          <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+            <p class="text-3xl font-extrabold text-indigo-600 mb-1">2 min</p>
+            <p class="text-sm font-semibold text-slate-800">Mise en service immédiate</p>
+            <p class="text-xs text-slate-500 mt-1">Créez votre espace établissement et invitez vos enseignants et étudiants sans délai.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Avantages Pédagogiques -->
+    <section id="avantages" class="py-20 bg-white">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="text-center max-w-2xl mx-auto mb-14">
+          <h2 class="text-3xl font-bold text-slate-900 mb-3">Une solution pensée pour toute la communauté éducative</h2>
+          <p class="text-slate-600 text-sm">Chaque acteur de votre établissement dispose d'un espace clair et adapté à ses besoins quotidiens.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div class="p-7 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div class="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl mb-5">🎓</div>
+            <h3 class="text-lg font-bold text-slate-900 mb-2">Pour les Étudiants</h3>
+            <p class="text-sm text-slate-600 leading-relaxed">
+              Un suivi limpide de leur progression par matière, de leurs objectifs acquis et des recommandations d'exercices pour consolider leurs acquis.
+            </p>
+          </div>
+          <div class="p-7 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div class="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl mb-5">📊</div>
+            <h3 class="text-lg font-bold text-slate-900 mb-2">Pour les Enseignants</h3>
+            <p class="text-sm text-slate-600 leading-relaxed">
+              Un tableau de bord visuel qui met immédiatement en évidence les élèves fragiles et suggère des actions concrètes (tutorat, soutien, remise à niveau).
+            </p>
+          </div>
+          <div class="p-7 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div class="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl mb-5">🏛️</div>
+            <h3 class="text-lg font-bold text-slate-900 mb-2">Pour la Direction</h3>
+            <p class="text-sm text-slate-600 leading-relaxed">
+              Une gestion centralisée des comptes enseignants et élèves, une adresse web dédiée à votre établissement et une maîtrise totale de votre abonnement.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Grille Tarifaire Commerciale -->
+    <section id="tarifs" class="py-20 bg-slate-50 border-t border-slate-200">
+      <div class="max-w-7xl mx-auto px-6">
+        <div class="text-center max-w-3xl mx-auto mb-10">
+          <h2 class="text-3xl font-extrabold text-slate-900 mb-3">Des tarifs transparents adaptés à la taille de votre établissement</h2>
+          <p class="text-slate-600 text-sm mb-8">Choisissez la capacité correspondant à vos effectifs (étudiants, enseignants et personnel administratif inclus).</p>
+
+          <!-- Toggle Mensuel / Annuel -->
+          <div class="inline-flex items-center bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+            <button id="btn-billing-monthly" onclick="setBillingCycle('monthly')"
+              class="px-5 py-2 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white">
+              Facturation Mensuelle
+            </button>
+            <button id="btn-billing-annual" onclick="setBillingCycle('annual')"
+              class="px-5 py-2 rounded-xl text-sm font-semibold transition text-slate-600 hover:text-slate-900 flex items-center gap-2">
+              <span>Engagement Annuel</span>
+              <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">-10%</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Cartes de plans : 200, 500, 1000 et >1000 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
+
+          <!-- Plan 200 utilisateurs -->
+          <div class="bg-white rounded-2xl border border-slate-200 p-7 flex flex-col justify-between shadow-sm hover:shadow-md transition">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Formule Essentiel</span>
+              <h3 class="text-xl font-bold text-slate-900 mt-1">Jusqu'à 200 utilisateurs</h3>
+              <p class="text-xs text-slate-500 mt-1">Idéal pour les écoles spécialisées et centres de formation.</p>
+
+              <div class="my-6 pb-6 border-b border-slate-100">
+                <div class="flex items-baseline gap-1">
+                  <span id="price-200" class="text-4xl font-extrabold text-slate-900">500 €</span>
+                  <span class="text-xs font-medium text-slate-500">HT / mois</span>
+                </div>
+                <p id="subprice-200" class="text-xs text-slate-500 mt-1">Sans engagement (ou 450 €/mois à l'année)</p>
+              </div>
+
+              <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Jusqu'à <strong>200 comptes</strong> actifs</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Portail web au nom de l'école</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Détection automatique des difficultés</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Support pédagogique standard</li>
+              </ul>
+            </div>
+
+            <button onclick="selectPlanFromPricing(200)"
+              class="w-full py-3 rounded-xl font-semibold text-sm bg-slate-900 hover:bg-slate-800 text-white transition">
+              Choisir l'offre 200
+            </button>
+          </div>
+
+          <!-- Plan 500 utilisateurs (Populaire) -->
+          <div class="bg-white rounded-2xl border-2 border-indigo-600 p-7 flex flex-col justify-between shadow-md relative">
+            <span class="absolute -top-3 right-6 bg-indigo-600 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+              Le plus choisi
+            </span>
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Formule Campus</span>
+              <h3 class="text-xl font-bold text-slate-900 mt-1">Jusqu'à 500 utilisateurs</h3>
+              <p class="text-xs text-slate-500 mt-1">Conçu pour les collèges, lycées et écoles supérieures.</p>
+
+              <div class="my-6 pb-6 border-b border-slate-100">
+                <div class="flex items-baseline gap-1">
+                  <span id="price-500" class="text-4xl font-extrabold text-slate-900">1 000 €</span>
+                  <span class="text-xs font-medium text-slate-500">HT / mois</span>
+                </div>
+                <p id="subprice-500" class="text-xs text-slate-500 mt-1">Sans engagement (ou 900 €/mois à l'année)</p>
+              </div>
+
+              <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Jusqu'à <strong>500 comptes</strong> actifs</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Portail web au nom de l'école</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Tableaux de bord enseignants avancés</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Recommandations personnalisées</li>
+              </ul>
+            </div>
+
+            <button onclick="selectPlanFromPricing(500)"
+              class="w-full py-3 rounded-xl font-semibold text-sm bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition">
+              Choisir l'offre 500
+            </button>
+          </div>
+
+          <!-- Plan 1000 utilisateurs -->
+          <div class="bg-white rounded-2xl border border-slate-200 p-7 flex flex-col justify-between shadow-sm hover:shadow-md transition">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Formule Académie</span>
+              <h3 class="text-xl font-bold text-slate-900 mt-1">Jusqu'à 1 000 utilisateurs</h3>
+              <p class="text-xs text-slate-500 mt-1">Pour les grands établissements et campus multi-filières.</p>
+
+              <div class="my-6 pb-6 border-b border-slate-100">
+                <div class="flex items-baseline gap-1">
+                  <span id="price-1000" class="text-4xl font-extrabold text-slate-900">2 000 €</span>
+                  <span class="text-xs font-medium text-slate-500">HT / mois</span>
+                </div>
+                <p id="subprice-1000" class="text-xs text-slate-500 mt-1">Sans engagement (ou 1 800 €/mois à l'année)</p>
+              </div>
+
+              <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Jusqu'à <strong>1 000 comptes</strong> actifs</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Portail web au nom de l'école</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Suivi analytique multi-promotions</li>
+                <li class="flex items-center gap-2"><span class="text-emerald-600 font-bold">✓</span> Accompagnement prioritaire dédié</li>
+              </ul>
+            </div>
+
+            <button onclick="selectPlanFromPricing(1000)"
+              class="w-full py-3 rounded-xl font-semibold text-sm bg-slate-900 hover:bg-slate-800 text-white transition">
+              Choisir l'offre 1 000
+            </button>
+          </div>
+
+          <!-- Plus de 1000 utilisateurs : Sur devis -->
+          <div class="bg-slate-900 text-white rounded-2xl p-7 flex flex-col justify-between shadow-sm">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">Grand Compte & Universités</span>
+              <h3 class="text-xl font-bold mt-1">Plus de 1 000 utilisateurs</h3>
+              <p class="text-xs text-slate-400 mt-1">Universités, réseaux d'écoles et groupements académiques.</p>
+
+              <div class="my-6 pb-6 border-b border-slate-800">
+                <div class="flex items-baseline gap-1">
+                  <span class="text-3xl font-extrabold text-white">Sur mesure</span>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">Tarification adaptée à votre volumétrie</p>
+              </div>
+
+              <ul class="space-y-3 text-sm text-slate-300 mb-8">
+                <li class="flex items-center gap-2"><span class="text-indigo-400 font-bold">✓</span> <strong>Utilisateurs illimités</strong> ou sur-mesure</li>
+                <li class="flex items-center gap-2"><span class="text-indigo-400 font-bold">✓</span> Déploiement multi-établissements</li>
+                <li class="flex items-center gap-2"><span class="text-indigo-400 font-bold">✓</span> Chargé de compte dédié</li>
+                <li class="flex items-center gap-2"><span class="text-indigo-400 font-bold">✓</span> Formation de vos équipes pédagogiques</li>
+              </ul>
+            </div>
+
+            <button onclick="openContactModal()"
+              class="w-full py-3 rounded-xl font-semibold text-sm bg-white hover:bg-slate-100 text-slate-900 transition">
+              Contacter le service commercial
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= VUE 2 : ESPACE CLIENT (ADMIN D'ABONNEMENT) ================= -->
+  <section id="view-client" class="hidden flex-1 py-12">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Espace Client Abonné</span>
+          <h1 class="text-2xl font-bold text-slate-900">Gestion de vos établissements</h1>
+          <p class="text-sm text-slate-500">Créez votre espace pédagogique personnalisé et accédez au portail de votre établissement.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Formulaire de création d'un établissement -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
+          <h2 class="text-lg font-bold text-slate-900 mb-1">Nouvel établissement</h2>
+          <p class="text-xs text-slate-500 mb-5">Votre compte actuel sera automatiquement défini comme administrateur principal de cet établissement.</p>
+
+          <form onsubmit="handleCreateTenant(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nom officiel de l'établissement</label>
+              <input id="tenant-name" type="text" required placeholder="Ex: Lycée Jean Moulin (ou 'Demo Polytech')"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+              <p class="text-[11px] text-slate-500 mt-1">
+                💡 <em>Commencez par <strong>« demo »</strong> (ex: « Demo Campus ») pour injecter automatiquement des données de test (profs, classes, élèves, notes xAPI). Tout autre nom sera créé entièrement vide (seul l'admin de base).</em>
+              </p>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Identifiant d'accès web (sous-domaine)</label>
+              <div class="flex items-center rounded-xl border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
+                <input id="tenant-slug" type="text" required pattern="[a-z0-9-]+" placeholder="school1"
+                  class="w-full px-3 py-2.5 text-sm focus:outline-none" />
+                <span class="bg-slate-100 px-3 py-2.5 text-xs text-slate-500 font-mono border-l border-slate-300">.cloudproject.mnbll.fr</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1">Lettres minuscules et chiffres uniquement (ex: school1, school2).</p>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Formule d'abonnement</label>
+              <select id="tenant-plan" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                <option value="200">Essentiel — 200 utilisateurs (500 €/mois ou 450 €/mois annuel)</option>
+                <option value="500">Campus — 500 utilisateurs (1 000 €/mois ou 900 €/mois annuel)</option>
+                <option value="1000">Académie — 1 000 utilisateurs (2 000 €/mois ou 1 800 €/mois annuel)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Périodicité choisie</label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 text-xs font-medium cursor-pointer">
+                  <input type="radio" name="tenant-billing" value="monthly" checked /> Mensuel
+                </label>
+                <label class="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 text-xs font-medium cursor-pointer">
+                  <input type="radio" name="tenant-billing" value="annual" /> Annuel (-10%)
+                </label>
+              </div>
+            </div>
+
+            <div id="create-tenant-msg" class="hidden text-xs p-3 rounded-xl"></div>
+
+            <button type="submit" id="btn-create-tenant"
+              class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition">
+              Mettre en service mon établissement
+            </button>
+          </form>
+        </div>
+
+        <!-- Liste des établissements du client -->
+        <div class="lg:col-span-2">
+          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg font-bold text-slate-900">Mes espaces scolaires actifs</h2>
+              <button onclick="loadMyTenants()" class="text-xs font-semibold text-indigo-600 hover:underline">Actualiser</button>
+            </div>
+            <div id="client-tenants-list" class="space-y-4"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VUE 3 : CONSOLE SUPER-ADMIN GLOBAL ================= -->
+  <section id="view-superadmin" class="hidden flex-1 py-10 bg-slate-100">
+    <div class="max-w-7xl mx-auto px-6 space-y-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800">Administration Globale Cloud</span>
+          <h1 class="text-2xl font-bold text-slate-900 mt-1">Supervision de la VM, des Stacks et des Comptes</h1>
+        </div>
+        <button onclick="refreshSuperAdmin()" class="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800">
+          🔄 Rafraîchir les métriques
+        </button>
+      </div>
+
+      <!-- Métriques ressources de la VM -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white p-5 rounded-2xl border border-slate-200">
+          <p class="text-xs text-slate-500 font-medium">Utilisation CPU VM</p>
+          <p id="metric-cpu" class="text-2xl font-extrabold text-slate-900 mt-1">-- %</p>
+          <div class="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+            <div id="bar-cpu" class="bg-indigo-600 h-full transition-all" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border border-slate-200">
+          <p class="text-xs text-slate-500 font-medium">Mémoire RAM VM</p>
+          <p id="metric-ram" class="text-2xl font-extrabold text-slate-900 mt-1">-- / -- Mo</p>
+          <div class="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+            <div id="bar-ram" class="bg-emerald-600 h-full transition-all" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border border-slate-200">
+          <p class="text-xs text-slate-500 font-medium">Espace Disque VM</p>
+          <p id="metric-disk" class="text-2xl font-extrabold text-slate-900 mt-1">-- Go</p>
+          <div class="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+            <div id="bar-disk" class="bg-amber-500 h-full transition-all" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border border-slate-200">
+          <p class="text-xs text-slate-500 font-medium">Stacks Établissements</p>
+          <p id="metric-stacks" class="text-2xl font-extrabold text-indigo-600 mt-1">0 actif(s)</p>
+          <p class="text-xs text-slate-400 mt-2">Isolés via Docker Compose</p>
+        </div>
+      </div>
+
+      <!-- Création rapide d'un Stack par le Super-Admin -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <h2 class="text-base font-bold text-slate-900">Déployer un nouveau Stack Établissement (Action Super-Admin)</h2>
+          <span class="text-[11px] text-slate-500">💡 Nom débutant par <strong>« demo »</strong> = pré-rempli | Tout autre nom = stack 100% vide</span>
+        </div>
+        <form onsubmit="handleSuperAdminCreateStack(event)" class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+          <input id="sa-inst-name" type="text" required placeholder="Nom établissement (ex: Demo Campus)"
+            class="px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+          <input id="sa-slug" type="text" required pattern="[a-z0-9-]+" placeholder="Sous-domaine (ex: school2)"
+            class="px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+          <input id="sa-owner-email" type="email" required placeholder="Email admin (ex: dir@ecole.fr)"
+            class="px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+          <select id="sa-plan" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white">
+            <option value="200">Plan 200 users</option>
+            <option value="500">Plan 500 users</option>
+            <option value="1000">Plan 1000 users</option>
+          </select>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold">
+            + Créer le Stack
+          </button>
+        </form>
+      </div>
+
+      <!-- Liste de tous les Stacks Docker -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200">
+        <h2 class="text-base font-bold text-slate-900 mb-4">Stacks d'établissements déployés</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 text-xs uppercase text-slate-400">
+                <th class="py-3 px-2">Établissement</th>
+                <th class="py-3 px-2">Accès DNS</th>
+                <th class="py-3 px-2">Compte Propriétaire</th>
+                <th class="py-3 px-2">Plan</th>
+                <th class="py-3 px-2">Statut Stack</th>
+                <th class="py-3 px-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sa-tenants-tbody" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Liste des comptes d'établissement (Portail) -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200">
+        <h2 class="text-base font-bold text-slate-900 mb-4">Comptes Administrateurs d'Abonnement enregistrés</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 text-xs uppercase text-slate-400">
+                <th class="py-3 px-2">ID</th>
+                <th class="py-3 px-2">Nom</th>
+                <th class="py-3 px-2">Email</th>
+                <th class="py-3 px-2">Rôle</th>
+                <th class="py-3 px-2">Stacks rattachés</th>
+                <th class="py-3 px-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sa-users-tbody" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MODALE CONNEXION / INSCRIPTION ================= -->
+  <div id="auth-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 id="auth-modal-title" class="text-lg font-bold text-slate-900">Connexion à votre espace</h3>
+        <button onclick="closeAuthModal()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-5">
+        <button id="tab-login" onclick="openAuthModal('login')" class="py-2 rounded-lg text-xs font-semibold bg-white shadow-sm text-slate-900">
+          Se connecter
+        </button>
+        <button id="tab-register" onclick="openAuthModal('register')" class="py-2 rounded-lg text-xs font-semibold text-slate-600">
+          Créer un compte client
+        </button>
+      </div>
+
+      <form onsubmit="handleAuthSubmit(event)" class="space-y-4">
+        <div id="field-fullname" class="hidden">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nom & Prénom (ou Fonction)</label>
+          <input id="auth-fullname" type="text" placeholder="Ex: Marie Dupont - Proviseure"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Adresse email professionnelle</label>
+          <input id="auth-email" type="email" required placeholder="direction@etablissement.fr"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Mot de passe</label>
+          <input id="auth-password" type="password" required placeholder="••••••••"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+        </div>
+
+        <div id="auth-error" class="hidden text-xs text-rose-600 bg-rose-50 p-3 rounded-xl"></div>
+
+        <button type="submit" id="auth-submit-btn"
+          class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm">
+          Continuer
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODALE CONTACT SERVICE COMMERCIAL (> 1000 USERS) ================= -->
+  <div id="contact-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Offre Grand Compte (+1 000 utilisateurs)</span>
+        <button onclick="closeContactModal()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <h3 class="text-xl font-bold text-slate-900 mb-1">Contacter notre service commercial</h3>
+      <p class="text-xs text-slate-500 mb-5">Décrivez les besoins de votre académie ou université. Un conseiller dédié vous recontactera sous 24h.</p>
+
+      <form onsubmit="submitContactForm(event)" class="space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Nom de l'établissement / Réseau</label>
+            <input type="text" required placeholder="Ex: Université de Bordeaux"
+              class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Effectif estimé</label>
+            <select class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white">
+              <option>1 000 à 2 500 utilisateurs</option>
+              <option>2 500 à 5 000 utilisateurs</option>
+              <option>Plus de 5 000 utilisateurs</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Email professionnel</label>
+          <input type="email" required placeholder="contact@universite.fr"
+            class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Message ou besoins spécifiques</label>
+          <textarea rows="3" placeholder="Précisez vos besoins (multi-campus, accompagnement, intégration...)"
+            class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"></textarea>
+        </div>
+        <div id="contact-success" class="hidden text-xs bg-emerald-50 text-emerald-700 p-3 rounded-xl font-medium">
+          ✓ Votre demande a bien été transmise à notre équipe commerciale.
+        </div>
+        <button type="submit" class="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm">
+          Envoyer ma demande de devis
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= FOOTER ================= -->
+  <footer class="bg-white border-t border-slate-200 py-8 mt-auto">
+    <div class="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
+      <p>© 2026 EduPulse SaaS — Plateforme d'accompagnement et de réussite étudiante.</p>
+      <div class="flex gap-6">
+        <a href="#tarifs" class="hover:text-slate-600">Tarifs</a>
+        <a href="#" onclick="openContactModal(); return false;" class="hover:text-slate-600">Service Commercial</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ================= LOGIQUE JAVASCRIPT ================= -->
+  <script>
+    let authMode = 'login';
+    let billingCycle = 'monthly';
+    let token = localStorage.getItem('edupulse_token') || null;
+    let currentUser = JSON.parse(localStorage.getItem('edupulse_user') || 'null');
+    let preselectedPlan = 500;
+
+    // Tarifs Mensuels vs Annuels
+    const PRICING = {
+      monthly: {
+        200: { price: '500 €', sub: 'Sans engagement (ou 450 €/mois engagé à l\'année)' },
+        500: { price: '1 000 €', sub: 'Sans engagement (ou 900 €/mois engagé à l\'année)' },
+        1000: { price: '2 000 €', sub: 'Sans engagement (ou 1 800 €/mois engagé à l\'année)' }
+      },
+      annual: {
+        200: { price: '450 €', sub: 'Facturé annuellement (5 400 € HT/an au lieu de 6 000 €)' },
+        500: { price: '900 €', sub: 'Facturé annuellement (10 800 € HT/an au lieu de 12 000 €)' },
+        1000: { price: '1 800 €', sub: 'Facturé annuellement (21 600 € HT/an au lieu de 24 000 €)' }
+      }
+    };
+
+    function setBillingCycle(cycle) {
+      billingCycle = cycle;
+      const btnM = document.getElementById('btn-billing-monthly');
+      const btnA = document.getElementById('btn-billing-annual');
+
+      if (cycle === 'monthly') {
+        btnM.className = 'px-5 py-2 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white';
+        btnA.className = 'px-5 py-2 rounded-xl text-sm font-semibold transition text-slate-600 hover:text-slate-900 flex items-center gap-2';
+      } else {
+        btnA.className = 'px-5 py-2 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white flex items-center gap-2';
+        btnM.className = 'px-5 py-2 rounded-xl text-sm font-semibold transition text-slate-600 hover:text-slate-900';
+      }
+
+      [200, 500, 1000].forEach(plan => {
+        document.getElementById(`price-${plan}`).textContent = PRICING[cycle][plan].price;
+        document.getElementById(`subprice-${plan}`).textContent = PRICING[cycle][plan].sub;
+      });
+    }
+
+    function selectPlanFromPricing(planUsers) {
+      preselectedPlan = planUsers;
+      const selectEl = document.getElementById('tenant-plan');
+      if (selectEl) selectEl.value = String(planUsers);
+
+      if (currentUser) {
+        switchView('client');
+      } else {
+        openAuthModal('register');
+      }
+    }
+
+    // Menu Paramètres (Bascule rapide entre les comptes)
+    function toggleDevMenu() {
+      const menu = document.getElementById('dev-menu');
+      menu.classList.toggle('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('dev-menu');
+      if (!menu.classList.contains('hidden') && !e.target.closest('#dev-menu') && !e.target.closest('button[onclick="toggleDevMenu()"]')) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    async function quickSwitch(role) {
+      document.getElementById('dev-menu').classList.add('hidden');
+
+      if (role === 'guest') {
+        logout();
+        return;
+      }
+
+      if (role === 'superadmin') {
+        try {
+          const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'superadmin@cloudproject.mnbll.fr',
+              password: 'SuperSecretPassword123!'
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            saveSession(data.access_token, data.user);
+            switchView('superadmin');
+            return;
+          }
+        } catch (err) {}
+        // Mode démo local si API hors-ligne
+        saveSession('demo-sa-token', { email: 'superadmin@cloudproject.mnbll.fr', full_name: 'Super Administrateur', role: 'SUPER_ADMIN' });
+        switchView('superadmin');
+      }
+
+      if (role === 'client') {
+        const demoEmail = 'direction@lycee-moulin.fr';
+        const demoPass = 'ClientPass123!';
+        try {
+          let res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: demoEmail, password: demoPass })
+          });
+          if (!res.ok) {
+            res = await fetch('/api/auth/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: demoEmail, password: demoPass, full_name: 'Direction Lycée Jean Moulin' })
+            });
+          }
+          if (res.ok) {
+            const data = await res.json();
+            saveSession(data.access_token, data.user);
+            switchView('client');
+            return;
+          }
+        } catch (err) {}
+        saveSession('demo-client-token', { email: demoEmail, full_name: 'Direction Lycée Jean Moulin', role: 'SUBSCRIPTION_ADMIN' });
+        switchView('client');
+      }
+    }
+
+    function saveSession(jwt, user) {
+      token = jwt;
+      currentUser = user;
+      localStorage.setItem('edupulse_token', jwt);
+      localStorage.setItem('edupulse_user', JSON.stringify(user));
+      updateHeaderUI();
+    }
+
+    function logout() {
+      token = null;
+      currentUser = null;
+      localStorage.removeItem('edupulse_token');
+      localStorage.removeItem('edupulse_user');
+      updateHeaderUI();
+      switchView('landing');
+    }
+
+    function updateHeaderUI() {
+      const guestEl = document.getElementById('header-guest');
+      const userEl = document.getElementById('header-user');
+      const badgeEl = document.getElementById('user-badge');
+
+      if (currentUser) {
+        guestEl.classList.add('hidden');
+        userEl.classList.remove('hidden');
+        userEl.classList.add('flex');
+        badgeEl.textContent = `${currentUser.full_name || currentUser.email} (${currentUser.role === 'SUPER_ADMIN' ? 'Super-Admin' : 'Espace Client'})`;
+      } else {
+        guestEl.classList.remove('hidden');
+        userEl.classList.add('hidden');
+        userEl.classList.remove('flex');
+      }
+    }
+
+    function switchView(view) {
+      document.getElementById('view-landing').classList.add('hidden');
+      document.getElementById('view-client').classList.add('hidden');
+      document.getElementById('view-superadmin').classList.add('hidden');
+      document.getElementById('public-nav').classList.toggle('hidden', view !== 'landing');
+
+      if (view === 'landing') {
+        document.getElementById('view-landing').classList.remove('hidden');
+      } else if (view === 'client') {
+        document.getElementById('view-client').classList.remove('hidden');
+        loadMyTenants();
+      } else if (view === 'superadmin') {
+        document.getElementById('view-superadmin').classList.remove('hidden');
+        refreshSuperAdmin();
+      }
+    }
+
+    // Authentification Modale
+    function openAuthModal(mode) {
+      authMode = mode;
+      document.getElementById('auth-modal').classList.remove('hidden');
+      document.getElementById('auth-error').classList.add('hidden');
+      document.getElementById('field-fullname').classList.toggle('hidden', mode === 'login');
+      document.getElementById('auth-modal-title').textContent = mode === 'login' ? 'Connexion à votre espace' : 'Créer votre compte établissement';
+      document.getElementById('tab-login').className = mode === 'login'
+        ? 'py-2 rounded-lg text-xs font-semibold bg-white shadow-sm text-slate-900'
+        : 'py-2 rounded-lg text-xs font-semibold text-slate-600';
+      document.getElementById('tab-register').className = mode === 'register'
+        ? 'py-2 rounded-lg text-xs font-semibold bg-white shadow-sm text-slate-900'
+        : 'py-2 rounded-lg text-xs font-semibold text-slate-600';
+    }
+
+    function closeAuthModal() {
+      document.getElementById('auth-modal').classList.add('hidden');
+    }
+
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('auth-email').value.trim();
+      const password = document.getElementById('auth-password').value;
+      const full_name = document.getElementById('auth-fullname').value.trim() || 'Administrateur Établissement';
+      const errEl = document.getElementById('auth-error');
+      errEl.classList.add('hidden');
+
+      const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, full_name })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.detail || 'Identifiants invalides';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        saveSession(data.access_token, data.user);
+        closeAuthModal();
+        switchView(data.user.role === 'SUPER_ADMIN' ? 'superadmin' : 'client');
+      } catch (err) {
+        errEl.textContent = 'Erreur de communication avec le serveur.';
+        errEl.classList.remove('hidden');
+      }
+    }
+
+    // Contact Commercial (>1000 users)
+    function openContactModal() {
+      document.getElementById('contact-success').classList.add('hidden');
+      document.getElementById('contact-modal').classList.remove('hidden');
+    }
+
+    function closeContactModal() {
+      document.getElementById('contact-modal').classList.add('hidden');
+    }
+
+    function submitContactForm(e) {
+      e.preventDefault();
+      document.getElementById('contact-success').classList.remove('hidden');
+      setTimeout(() => closeContactModal(), 1800);
+    }
+
+    // Gestion des établissements côté Client
+    async function loadMyTenants() {
+      const container = document.getElementById('client-tenants-list');
+      try {
+        const res = await fetch('/api/tenants/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error();
+        const tenants = await res.json();
+        renderClientTenants(tenants);
+      } catch (e) {
+        container.innerHTML = `<p class="text-xs text-slate-400 py-6 text-center">Aucun établissement configuré sur votre compte pour le moment.</p>`;
+      }
+    }
+
+    function renderClientTenants(tenants) {
+      const container = document.getElementById('client-tenants-list');
+      if (!tenants || tenants.length === 0) {
+        container.innerHTML = `
+          <div class="py-12 px-4 text-center border-2 border-dashed border-slate-200 rounded-2xl">
+            <p class="text-sm font-semibold text-slate-700">Aucun établissement configuré sur votre compte</p>
+            <p class="text-xs text-slate-400 mt-1">Remplissez le formulaire à gauche et cliquez sur « Mettre en service mon établissement ».</p>
+          </div>
+        `;
+        return;
+      }
+
+      const planNames = {
+        200: 'Formule Essentiel (200 utilisateurs max)',
+        500: 'Formule Campus (500 utilisateurs max)',
+        1000: 'Formule Académie (1 000 utilisateurs max)'
+      };
+
+      container.innerHTML = tenants.map(t => {
+        const isActive = t.status === 'RUNNING';
+        const directUrl = t.direct_local_url || `http://localhost:${8100 + (t.id || 1)}`;
+        const subdomainUrl = t.local_subdomain_url || `http://${t.slug}.localhost:8000`;
+        const primaryUrl = window.location.port === '8000' ? subdomainUrl : directUrl;
+
+        return `
+          <div class="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-md transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-amber-500'}"></span>
+                <h3 class="font-bold text-base text-slate-900">${t.institution_name}</h3>
+                <span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                  ${isActive ? 'En service' : 'Suspendu'}
+                </span>
+              </div>
+              <p class="text-xs text-slate-600">
+                Offre souscrite : <strong>${planNames[t.plan_max_users] || (t.plan_max_users + ' utilisateurs max')}</strong>
+              </p>
+              <p class="text-xs text-slate-500">
+                Adresse web dédiée : <span class="font-semibold text-indigo-600">${t.slug}.cloudproject.mnbll.fr</span>
+              </p>
+            </div>
+
+            <div class="flex flex-col sm:items-end gap-2">
+              <a href="${primaryUrl}" target="_blank"
+                class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition">
+                <span>Accéder à mon établissement</span>
+                <span>→</span>
+              </a>
+              <div class="flex items-center gap-3 text-[11px] text-slate-400">
+                <a href="${directUrl}" target="_blank" class="hover:text-indigo-600 underline">Accès direct (${directUrl.replace('http://', '')})</a>
+                <span>•</span>
+                <a href="${subdomainUrl}" target="_blank" class="hover:text-indigo-600 underline">${t.slug}.localhost:8000</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function handleCreateTenant(e) {
+      e.preventDefault();
+      const institution_name = document.getElementById('tenant-name').value.trim();
+      const slug = document.getElementById('tenant-slug').value.trim().toLowerCase();
+      const plan_max_users = parseInt(document.getElementById('tenant-plan').value, 10);
+      const msgEl = document.getElementById('create-tenant-msg');
+      const btn = document.getElementById('btn-create-tenant');
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Mise en service de votre espace en cours...';
+      msgEl.className = 'text-xs p-3.5 rounded-xl bg-indigo-50 text-indigo-700 font-medium border border-indigo-200';
+      msgEl.textContent = `Création et préparation de l'espace dédié pour « ${institution_name} » en cours, veuillez patienter quelques secondes...`;
+      msgEl.classList.remove('hidden');
+
+      try {
+        const res = await fetch('/api/tenants', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ institution_name, slug, plan_max_users })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          msgEl.className = 'text-xs p-3.5 rounded-xl bg-rose-50 text-rose-700 font-medium border border-rose-200';
+          msgEl.textContent = data.detail || 'Erreur lors de la création.';
+          return;
+        }
+
+        const openLink = window.location.port === '8000'
+          ? (data.local_subdomain_url || `http://${data.slug}.localhost:8000`)
+          : (data.direct_local_url || `http://localhost:${8100 + (data.id || 1)}`);
+
+        msgEl.className = 'text-xs p-4 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 space-y-2';
+        msgEl.innerHTML = `
+          <p class="font-bold text-sm">✅ Votre établissement « ${data.institution_name} » est maintenant en service !</p>
+          <p>Il est affiché dans votre liste à droite et accessible immédiatement :</p>
+          <div class="pt-1">
+            <a href="${openLink}" target="_blank" class="inline-block px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs">
+              Ouvrir l'espace ${data.institution_name} maintenant →
+            </a>
+          </div>
+        `;
+        e.target.reset();
+        await loadMyTenants();
+      } catch (err) {
+        msgEl.className = 'text-xs p-3.5 rounded-xl bg-rose-50 text-rose-700 font-medium border border-rose-200';
+        msgEl.textContent = 'Erreur réseau lors de la mise en service.';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Mettre en service mon établissement';
+      }
+    }
+
+    // Super-Admin Global
+    async function refreshSuperAdmin() {
+      try {
+        const [vmRes, tenantsRes, usersRes] = await Promise.all([
+          fetch('/api/superadmin/vm-stats', { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch('/api/superadmin/tenants', { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch('/api/superadmin/users', { headers: { 'Authorization': `Bearer ${token}` } })
+        ]);
+
+        if (vmRes.ok) {
+          const vm = await vmRes.json();
+          document.getElementById('metric-cpu').textContent = `${vm.cpu_percent} %`;
+          document.getElementById('bar-cpu').style.width = `${Math.min(vm.cpu_percent, 100)}%`;
+          document.getElementById('metric-ram').textContent = `${vm.ram_used_mb} / ${vm.ram_total_mb} Mo`;
+          document.getElementById('bar-ram').style.width = `${Math.min(vm.ram_percent, 100)}%`;
+          document.getElementById('metric-disk').textContent = `${vm.disk_used_gb} / ${vm.disk_total_gb} Go`;
+          document.getElementById('bar-disk').style.width = `${Math.min(vm.disk_percent, 100)}%`;
+        }
+
+        if (tenantsRes.ok) {
+          const tenants = await tenantsRes.json();
+          document.getElementById('metric-stacks').textContent = `${tenants.length} actif(s)`;
+          const tbody = document.getElementById('sa-tenants-tbody');
+          tbody.innerHTML = tenants.map(t => `
+            <tr>
+              <td class="py-3 px-2 font-semibold text-slate-900">${t.institution_name}</td>
+              <td class="py-3 px-2 font-mono text-xs text-indigo-600">${t.slug}.cloudproject.mnbll.fr</td>
+              <td class="py-3 px-2 text-xs text-slate-600">${t.owner_email || '-'}</td>
+              <td class="py-3 px-2 text-xs font-semibold">${t.plan_max_users} users</td>
+              <td class="py-3 px-2">
+                <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full ${t.status === 'RUNNING' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">
+                  ${t.status}
+                </span>
+              </td>
+              <td class="py-3 px-2 text-right space-x-2">
+                <button onclick="saToggleTenant('${t.slug}', '${t.status}')" class="text-xs font-semibold text-amber-600 hover:underline">
+                  ${t.status === 'RUNNING' ? 'Stopper' : 'Démarrer'}
+                </button>
+                <button onclick="saDeleteTenant('${t.slug}')" class="text-xs font-semibold text-rose-600 hover:underline">
+                  Supprimer
+                </button>
+              </td>
+            </tr>
+          `).join('') || `<tr><td colspan="6" class="py-6 text-center text-xs text-slate-400">Aucun stack déployé</td></tr>`;
+        }
+
+        if (usersRes.ok) {
+          const users = await usersRes.json();
+          const ubody = document.getElementById('sa-users-tbody');
+          ubody.innerHTML = users.map(u => `
+            <tr>
+              <td class="py-3 px-2 text-xs text-slate-400">#${u.id}</td>
+              <td class="py-3 px-2 font-medium text-slate-900">${u.full_name || '-'}</td>
+              <td class="py-3 px-2 text-xs text-slate-600">${u.email}</td>
+              <td class="py-3 px-2 text-xs font-semibold">${u.role}</td>
+              <td class="py-3 px-2 text-xs">${u.tenant_count || 0}</td>
+              <td class="py-3 px-2 text-right">
+                ${u.role !== 'SUPER_ADMIN' ? `<button onclick="saDeleteUser(${u.id})" class="text-xs font-semibold text-rose-600 hover:underline">Supprimer compte</button>` : '<span class="text-xs text-slate-300">Protégé</span>'}
+              </td>
+            </tr>
+          `).join('');
+        }
+      } catch (e) {}
+    }
+
+    async function handleSuperAdminCreateStack(e) {
+      e.preventDefault();
+      const institution_name = document.getElementById('sa-inst-name').value.trim();
+      const slug = document.getElementById('sa-slug').value.trim().toLowerCase();
+      const owner_email = document.getElementById('sa-owner-email').value.trim();
+      const plan_max_users = parseInt(document.getElementById('sa-plan').value, 10);
+
+      await fetch('/api/superadmin/tenants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ institution_name, slug, owner_email, plan_max_users })
+      });
+      e.target.reset();
+      refreshSuperAdmin();
+    }
+
+    async function saToggleTenant(slug, currentStatus) {
+      const action = currentStatus === 'RUNNING' ? 'stop' : 'start';
+      await fetch(`/api/superadmin/tenants/${slug}/${action}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saDeleteTenant(slug) {
+      if (!confirm(`Supprimer définitivement le stack ${slug} et ses données ?`)) return;
+      await fetch(`/api/superadmin/tenants/${slug}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saDeleteUser(userId) {
+      if (!confirm('Supprimer ce compte client et tous ses stacks associés ?')) return;
+      await fetch(`/api/superadmin/users/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      refreshSuperAdmin();
+    }
+
+    // Initialisation au chargement
+    updateHeaderUI();
+  </script>
+</body>
+</html>

@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Espace Établissement — EduPulse</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
+
+  <!-- ================= HEADER DE L'ÉTABLISSEMENT ================= -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white font-bold flex items-center justify-center shadow-sm">
+          🏫
+        </div>
+        <div>
+          <h1 id="header-inst-name" class="font-bold text-slate-900 text-base leading-tight">Chargement...</h1>
+          <p id="header-domain" class="text-[11px] font-mono text-indigo-600">...</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Badge Quota Plan -->
+        <div class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs">
+          <span class="text-slate-500">Capacité plan :</span>
+          <strong id="header-quota" class="text-slate-800">-- / -- comptes</strong>
+        </div>
+
+        <!-- Utilisateur connecté -->
+        <div id="user-info-bar" class="hidden items-center gap-2">
+          <span id="current-user-badge" class="text-xs font-semibold px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700"></span>
+          <button onclick="logout()" class="text-xs font-semibold text-rose-600 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg">
+            Déconnexion
+          </button>
+        </div>
+
+        <!-- BOUTON PARAMÈTRES (⚙️ BASCULE RAPIDE ENTRE ÉTUDIANT / ENSEIGNANT / ADMIN) -->
+        <div class="relative">
+          <button id="btn-role-menu" onclick="toggleRoleMenu()" title="Basculer rapidement entre les 3 rôles de l'établissement"
+            class="w-9 h-9 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-600 cursor-pointer">
+            ⚙️
+          </button>
+          <div id="role-menu" class="hidden absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-50">
+            <div class="px-2 py-1.5 border-b border-slate-100 mb-2">
+              <p class="text-xs font-bold uppercase tracking-wider text-slate-400">Mode Démo Établissement</p>
+              <p class="text-[11px] text-slate-500">Tester les 3 pages du stack sans ressaisir les mots de passe</p>
+            </div>
+            <div class="space-y-1">
+              <button onclick="quickSwitchRole('ETUDIANT')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold hover:bg-indigo-50 text-slate-700 flex items-center justify-between">
+                <span>🎓 Vue Étudiant (Saisie notes xAPI)</span>
+                <span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">Élève</span>
+              </button>
+              <button onclick="quickSwitchRole('ENSEIGNANT')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold hover:bg-emerald-50 text-slate-700 flex items-center justify-between">
+                <span>📊 Vue Enseignant (Scores & Alertes)</span>
+                <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">Prof</span>
+              </button>
+              <button onclick="quickSwitchRole('ADMIN')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold hover:bg-amber-50 text-slate-700 flex items-center justify-between">
+                <span>🏛️ Vue Admin École (Comptes & Quota)</span>
+                <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Admin</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= ÉCRAN DE CONNEXION DE L'ÉTABLISSEMENT ================= -->
+  <section id="view-login" class="flex-1 flex items-center justify-center p-6">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full p-7">
+      <div class="text-center mb-6">
+        <span class="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 mb-2">
+          Portail Pédagogique Isolé
+        </span>
+        <h2 id="login-inst-title" class="text-2xl font-bold text-slate-900">Connexion à votre établissement</h2>
+        <p class="text-xs text-slate-500 mt-1">
+          Connectez-vous avec votre compte ou utilisez le bouton <strong>⚙️</strong> en haut à droite.
+        </p>
+      </div>
+
+      <form onsubmit="handleLogin(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Adresse email</label>
+          <input id="login-email" type="email" required placeholder="direction@lycee-moulin.fr"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Mot de passe</label>
+          <input id="login-password" type="password" required placeholder="••••••••"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+        </div>
+        <div id="login-error" class="hidden text-xs bg-rose-50 text-rose-600 p-3 rounded-xl"></div>
+        <button type="submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm transition">
+          Se connecter
+        </button>
+      </form>
+
+      <div id="login-hints" class="mt-5 pt-4 border-t border-slate-100 text-xs text-slate-500 space-y-1">
+        <p class="font-semibold text-slate-700">Comptes disponibles sur cet établissement :</p>
+        <p>• <strong>Admin principal :</strong> <span id="hint-admin-email" class="font-mono text-indigo-600">direction@lycee-moulin.fr</span> (même mot de passe que sur le portail, ex: <code class="bg-slate-100 px-1 rounded">ClientPass123!</code>)</p>
+        <p>• <strong>Accès rapide :</strong> Cliquez sur <strong>⚙️</strong> en haut à droite pour tester les rôles (disponible sur les établissements de démo).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PAGE 1 : ESPACE ÉTUDIANT (SIMULATION DE NOTES xAPI) ================= -->
+  <section id="view-student" class="hidden flex-1 py-8">
+    <div class="max-w-6xl mx-auto px-6 space-y-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Espace Étudiant</span>
+          <h2 id="student-welcome" class="text-2xl font-bold text-slate-900">Mes résultats & traces d'apprentissage</h2>
+        </div>
+      </div>
+
+      <!-- Bilan personnel et recommandation automatique -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <p class="text-xs text-slate-500 font-medium">Moyenne générale actuelle</p>
+          <p id="stu-avg" class="text-3xl font-extrabold text-slate-900 mt-1">-- / 20</p>
+          <p id="stu-trend" class="text-xs text-slate-500 mt-2">Tendance : --</p>
+        </div>
+        <div class="md:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Diagnostic & Accompagnement personnalisé</span>
+            <span id="stu-risk-badge" class="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-700">--</span>
+          </div>
+          <p id="stu-recommendation" class="text-sm text-slate-700 mt-3 leading-relaxed">
+            Chargement de votre analyse pédagogique...
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Formulaire d'envoi d'une note (Génère un Statement xAPI) -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
+          <h3 class="text-base font-bold text-slate-900 mb-1">Enregistrer un résultat de cours</h3>
+          <p class="text-xs text-slate-500 mb-5">
+            Chaque note saisie est transmise au Learning Record Store (LRS) sous forme de Statement normé <strong>xAPI (JSONB)</strong>.
+          </p>
+
+          <form onsubmit="handleSendXAPI(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Matière / Module</label>
+              <select id="xapi-course" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                <option value="Algorithmique & Python">Algorithmique & Python</option>
+                <option value="Bases de Données SQL">Bases de Données SQL</option>
+                <option value="Architecture Cloud">Architecture Cloud</option>
+                <option value="Réseaux & Sécurité">Réseaux & Sécurité</option>
+                <option value="DevOps & Conteneurisation">DevOps & Conteneurisation</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Type d'activité (Verbe xAPI)</label>
+              <select id="xapi-verb" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                <option value="completed">Examen / Évaluation complétée (completed)</option>
+                <option value="attempted">Quiz d'entraînement tenté (attempted)</option>
+                <option value="passed">TP validé (passed)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Note obtenue (sur 20)</label>
+              <input id="xapi-score" type="number" step="0.5" min="0" max="20" required placeholder="Ex: 8.5"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+            </div>
+
+            <div id="xapi-feedback" class="hidden text-xs p-3 rounded-xl"></div>
+
+            <button type="submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm">
+              Envoyer la note (Statement xAPI)
+            </button>
+          </form>
+        </div>
+
+        <!-- Historique des notes et aperçu du Statement JSON xAPI -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 class="text-base font-bold text-slate-900 mb-4">Historique de mes Statements xAPI enregistrés</h3>
+          <div id="stu-statements-list" class="space-y-3"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PAGE 2 : ESPACE ENSEIGNANT (SCORES & ÉLÈVES EN DIFFICULTÉ) ================= -->
+  <section id="view-teacher" class="hidden flex-1 py-8">
+    <div class="max-w-7xl mx-auto px-6 space-y-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-emerald-600">Espace Enseignant</span>
+          <h2 class="text-2xl font-bold text-slate-900">Suivi des scores & Détection des élèves en difficulté</h2>
+        </div>
+        <button onclick="loadTeacherDashboard()" class="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold">
+          🔄 Recalculer & Actualiser
+        </button>
+      </div>
+
+      <!-- Cartes de synthèse de la promotion -->
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div class="bg-white p-5 rounded-2xl border border-slate-200">
+          <p class="text-xs text-slate-500">Moyenne de la classe</p>
+          <p id="teach-avg" class="text-2xl font-extrabold text-slate-900 mt-1">-- / 20</p>
+        </div>
+        <div class="bg-rose-50 p-5 rounded-2xl border border-rose-200">
+          <p class="text-xs text-rose-700 font-semibold">En décrochage (Critique)</p>
+          <p id="teach-crit" class="text-2xl font-extrabold text-rose-700 mt-1">0 élève(s)</p>
+        </div>
+        <div class="bg-amber-50 p-5 rounded-2xl border border-amber-200">
+          <p class="text-xs text-amber-800 font-semibold">À surveiller (Vigilance)</p>
+          <p id="teach-vig" class="text-2xl font-extrabold text-amber-800 mt-1">0 élève(s)</p>
+        </div>
+        <div class="bg-emerald-50 p-5 rounded-2xl border border-emerald-200">
+          <p class="text-xs text-emerald-800 font-semibold">Progression régulière</p>
+          <p id="teach-stab" class="text-2xl font-extrabold text-emerald-800 mt-1">0 élève(s)</p>
+        </div>
+      </div>
+
+      <!-- Tableau d'analyse et solutions proposées -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <h3 class="text-base font-bold text-slate-900 mb-4">Diagnostic par étudiant et solutions pédagogiques proposées</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 text-xs uppercase text-slate-400">
+                <th class="py-3 px-2">Étudiant & Classe</th>
+                <th class="py-3 px-2">Moyenne</th>
+                <th class="py-3 px-2">Évolution</th>
+                <th class="py-3 px-2">Matière fragile</th>
+                <th class="py-3 px-2">Niveau de risque</th>
+                <th class="py-3 px-2">Solution proposée par l'algorithme</th>
+              </tr>
+            </thead>
+            <tbody id="teach-students-tbody" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Flux LRS xAPI en direct -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <h3 class="text-base font-bold text-slate-900 mb-2">Dernières traces xAPI reçues dans le conteneur SQL (JSONB)</h3>
+        <div id="teach-xapi-feed" class="space-y-2 text-xs"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PAGE 3 : ESPACE ADMIN ÉTABLISSEMENT (GESTION DES COMPTES & RÔLES) ================= -->
+  <section id="view-admin" class="hidden flex-1 py-8">
+    <div class="max-w-6xl mx-auto px-6 space-y-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-amber-600">Administration de l'Établissement</span>
+          <h2 class="text-2xl font-bold text-slate-900">Gestion des comptes & Contrôle du plan souscrit</h2>
+        </div>
+      </div>
+
+      <!-- Jauge du quota d'utilisateurs du plan (200, 500 ou 1000) -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-bold text-slate-800">Occupation de votre plan d'abonnement</span>
+          <span id="admin-quota-label" class="text-sm font-extrabold text-indigo-600">-- / -- utilisateurs</span>
+        </div>
+        <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+          <div id="admin-quota-bar" class="bg-indigo-600 h-full transition-all" style="width: 0%"></div>
+        </div>
+        <p class="text-xs text-slate-500 mt-2">
+          Le compte utilisé lors de la création du stack est l'administrateur principal. Chaque compte créé ci-dessous est décompté de la limite de votre plan.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Formulaire de création de compte avec choix du rôle -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
+          <h3 class="text-base font-bold text-slate-900 mb-4">Créer un compte dans l'école</h3>
+          <form onsubmit="handleAdminCreateUser(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nom complet</label>
+              <input id="new-user-name" type="text" required placeholder="Ex: Clara Moreau"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Adresse email</label>
+              <input id="new-user-email" type="email" required placeholder="clara.moreau@ecole.fr"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Rôle dans l'établissement</label>
+              <select id="new-user-role" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                <option value="ETUDIANT">🎓 Étudiant (Saisie & suivi des notes)</option>
+                <option value="ENSEIGNANT">📊 Enseignant (Analyse & détection)</option>
+                <option value="ADMIN">🏛️ Administrateur (Gestion des comptes)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Classe / Promotion / Groupe (optionnel)</label>
+              <input id="new-user-class" type="text" placeholder="Ex: M1 Cloud & DevOps, L3 Informatique..."
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Mot de passe initial</label>
+              <input id="new-user-pass" type="password" required value="Ecole123!"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+            </div>
+
+            <div id="admin-create-msg" class="hidden text-xs p-3 rounded-xl"></div>
+
+            <button type="submit" class="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm">
+              + Ajouter l'utilisateur
+            </button>
+          </form>
+        </div>
+
+        <!-- Liste des comptes de l'établissement -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 class="text-base font-bold text-slate-900 mb-4">Utilisateurs enregistrés dans ce stack</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="border-b border-slate-200 text-xs uppercase text-slate-400">
+                  <th class="py-2.5 px-2">Nom & Promotion</th>
+                  <th class="py-2.5 px-2">Email</th>
+                  <th class="py-2.5 px-2">Rôle</th>
+                  <th class="py-2.5 px-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="admin-users-tbody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SCRIPT FRONTEND DE L'ÉTABLISSEMENT ================= -->
+  <script>
+    let token = localStorage.getItem('tenant_token') || null;
+    let currentUser = JSON.parse(localStorage.getItem('tenant_user') || 'null');
+    let stackInfo = null;
+
+    async function loadStackInfo() {
+      try {
+        const res = await fetch('/api/info');
+        if (!res.ok) return;
+        stackInfo = await res.json();
+        document.getElementById('header-inst-name').textContent = stackInfo.institution_name;
+        document.getElementById('login-inst-title').textContent = stackInfo.institution_name;
+        document.getElementById('header-domain').textContent = `${stackInfo.tenant_slug}.cloudproject.mnbll.fr`;
+        document.getElementById('header-quota').textContent = `${stackInfo.current_users} / ${stackInfo.max_users} comptes`;
+        if (stackInfo.admin_email) {
+          const hintAdmin = document.getElementById('hint-admin-email');
+          if (hintAdmin) hintAdmin.textContent = stackInfo.admin_email;
+        }
+
+        const hintBox = document.getElementById('login-hints');
+        if (hintBox) {
+          if (stackInfo.is_demo) {
+            hintBox.innerHTML = `
+              <p class="font-semibold text-emerald-800 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Mode Démonstration Actif (Données pré-remplies) :
+              </p>
+              <p>• <strong>Enseignants :</strong> Pr. Sophie Laurent (<code class="bg-slate-100 px-1 rounded text-slate-700">prof.laurent@${stackInfo.tenant_slug}.fr</code> / <code class="bg-slate-100 px-1 rounded">Demo123!</code>)</p>
+              <p>• <strong>Étudiants :</strong> Lucas Martin, Chloé Dubois, Hugo Petit... (<code class="bg-slate-100 px-1 rounded">Demo123!</code>)</p>
+              <p>• <strong>Admin :</strong> <span class="font-mono text-indigo-600">${stackInfo.admin_email}</span></p>
+              <p>• <strong>Accès rapide :</strong> Utilisez le bouton <strong>⚙️</strong> en haut à droite pour basculer instantanément entre Étudiant, Enseignant ou Admin.</p>
+            `;
+          } else {
+            hintBox.innerHTML = `
+              <p class="font-semibold text-slate-700">Établissement Standard (Initialisé vierge) :</p>
+              <p>• <strong>Admin principal :</strong> <span class="font-mono text-indigo-600">${stackInfo.admin_email}</span> (mot de passe identique au compte créateur sur le portail).</p>
+              <p class="text-slate-500"><em>Cet établissement a été créé sans données de démonstration. Connectez-vous avec le compte administrateur pour ajouter vos enseignants et vos classes d'étudiants.</em></p>
+            `;
+          }
+        }
+      } catch (e) {
+        console.error("Erreur lors du chargement des infos du stack :", e);
+      }
+    }
+
+    function toggleRoleMenu() {
+      document.getElementById('role-menu').classList.toggle('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('role-menu');
+      if (menu && !menu.classList.contains('hidden') && !e.target.closest('#role-menu') && !e.target.closest('#btn-role-menu')) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    async function quickSwitchRole(role) {
+      document.getElementById('role-menu').classList.add('hidden');
+      try {
+        const res = await fetch(`/api/auth/demo-switch/${role}`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          saveSession(data.access_token, data.user);
+          routeByRole();
+        } else {
+          alert(data.detail || `Impossible de basculer vers le rôle ${role}.`);
+        }
+      } catch (e) {
+        alert("Erreur de communication avec le serveur de l'établissement.");
+      }
+    }
+
+    function saveSession(jwt, user) {
+      token = jwt;
+      currentUser = user;
+      localStorage.setItem('tenant_token', jwt);
+      localStorage.setItem('tenant_user', JSON.stringify(user));
+    }
+
+    function logout() {
+      token = null;
+      currentUser = null;
+      localStorage.removeItem('tenant_token');
+      localStorage.removeItem('tenant_user');
+      routeByRole();
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      errEl.classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.detail || 'Identifiants incorrects';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        saveSession(data.access_token, data.user);
+        routeByRole();
+      } catch (err) {
+        errEl.textContent = "Erreur de connexion au serveur.";
+        errEl.classList.remove('hidden');
+      }
+    }
+
+    function routeByRole() {
+      ['view-login', 'view-student', 'view-teacher', 'view-admin'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+      });
+
+      const userBar = document.getElementById('user-info-bar');
+      if (!currentUser || !token) {
+        userBar.classList.add('hidden');
+        document.getElementById('view-login').classList.remove('hidden');
+        return;
+      }
+
+      userBar.classList.remove('hidden');
+      userBar.classList.add('flex');
+      const classSuffix = currentUser.class_name ? ` • ${currentUser.class_name}` : '';
+      document.getElementById('current-user-badge').textContent = `${currentUser.full_name} (${currentUser.role}${classSuffix})`;
+
+      if (currentUser.role === 'ETUDIANT') {
+        document.getElementById('view-student').classList.remove('hidden');
+        loadStudentDashboard();
+      } else if (currentUser.role === 'ENSEIGNANT') {
+        document.getElementById('view-teacher').classList.remove('hidden');
+        loadTeacherDashboard();
+      } else if (currentUser.role === 'ADMIN') {
+        document.getElementById('view-admin').classList.remove('hidden');
+        loadAdminDashboard();
+      }
+    }
+
+    // ================= LOGIQUE PAGE ÉTUDIANT & xAPI =================
+    async function loadStudentDashboard() {
+      const res = await fetch('/api/student/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const className = data.student.class_name ? ` (${data.student.class_name})` : '';
+      document.getElementById('student-welcome').textContent = `Bonjour ${data.student.full_name}${className}`;
+      const a = data.analytics;
+      document.getElementById('stu-avg').textContent = a.average_score !== null ? `${a.average_score} / 20` : '-- / 20';
+      document.getElementById('stu-trend').textContent = `Évolution récente : ${a.recent_trend >= 0 ? '+' : ''}${a.recent_trend} pt(s)`;
+      document.getElementById('stu-recommendation').textContent = a.recommendation;
+
+      const badge = document.getElementById('stu-risk-badge');
+      badge.textContent = a.risk_level;
+      badge.className = 'text-xs font-bold px-3 py-1 rounded-full ' + (
+        a.risk_level === 'CRITIQUE' ? 'bg-rose-100 text-rose-700' :
+        a.risk_level === 'VIGILANCE' ? 'bg-amber-100 text-amber-800' :
+        'bg-emerald-100 text-emerald-700'
+      );
+
+      const list = document.getElementById('stu-statements-list');
+      list.innerHTML = data.statements.map(s => `
+        <details class="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
+          <summary class="cursor-pointer flex items-center justify-between text-sm font-semibold text-slate-800">
+            <span>📘 ${s.course_name} — <strong class="${s.score_raw < 10 ? 'text-rose-600' : 'text-emerald-600'}">${s.score_raw} / 20</strong></span>
+            <span class="text-xs text-slate-400 font-normal">${s.timestamp} (Voir JSON xAPI)</span>
+          </summary>
+          <pre class="mt-3 p-3 rounded-lg bg-slate-900 text-emerald-400 text-[11px] overflow-x-auto">${JSON.stringify(s.raw_xapi, null, 2)}</pre>
+        </details>
+      `).join('') || `<p class="text-xs text-slate-400 py-6 text-center">Aucune note enregistrée.</p>`;
+    }
+
+    async function handleSendXAPI(e) {
+      e.preventDefault();
+      const course = document.getElementById('xapi-course').value;
+      const verb = document.getElementById('xapi-verb').value;
+      const score = parseFloat(document.getElementById('xapi-score').value);
+      const fb = document.getElementById('xapi-feedback');
+
+      const xapiPayload = {
+        actor: {
+          name: currentUser.full_name,
+          mbox: `mailto:${currentUser.email}`
+        },
+        verb: {
+          id: `http://adlnet.gov/expapi/verbs/${verb}`,
+          display: { "fr-FR": verb }
+        },
+        object: {
+          id: `http://${window.location.host}/courses/${encodeURIComponent(course.toLowerCase())}`,
+          definition: {
+            name: { "fr-FR": course },
+            type: "http://adlnet.gov/expapi/activities/assessment"
+          }
+        },
+        result: {
+          score: { raw: score, min: 0, max: 20, scaled: +(score / 20).toFixed(2) },
+          success: score >= 10,
+          completion: true
+        }
+      };
+
+      const res = await fetch('/xapi/statements', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(xapiPayload)
+      });
+
+      if (res.ok) {
+        fb.className = 'text-xs p-3 rounded-xl bg-emerald-50 text-emerald-700 font-medium';
+        fb.textContent = `✓ Statement xAPI enregistré (${score}/20 en ${course}). Diagnostic mis à jour !`;
+        fb.classList.remove('hidden');
+        document.getElementById('xapi-score').value = '';
+        loadStudentDashboard();
+        loadStackInfo();
+      }
+    }
+
+    // ================= LOGIQUE PAGE ENSEIGNANT =================
+    async function loadTeacherDashboard() {
+      const res = await fetch('/api/teacher/analytics', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      document.getElementById('teach-avg').textContent = `${data.summary.class_average} / 20`;
+      document.getElementById('teach-crit').textContent = `${data.summary.critical_count} élève(s)`;
+      document.getElementById('teach-vig').textContent = `${data.summary.vigilance_count} élève(s)`;
+      document.getElementById('teach-stab').textContent = `${data.summary.stable_count} élève(s)`;
+
+      const tbody = document.getElementById('teach-students-tbody');
+      tbody.innerHTML = data.students.map(s => {
+        const badgeClass =
+          s.risk_level === 'CRITIQUE' ? 'bg-rose-100 text-rose-700' :
+          s.risk_level === 'VIGILANCE' ? 'bg-amber-100 text-amber-800' :
+          s.risk_level === 'STABLE' ? 'bg-emerald-100 text-emerald-700' :
+          'bg-slate-100 text-slate-500';
+
+        return `
+          <tr>
+            <td class="py-3.5 px-2">
+              <p class="font-bold text-slate-900">${s.full_name}</p>
+              <p class="text-xs text-indigo-600 font-medium">${s.class_name || 'Générale'} • <span class="text-slate-400 font-normal">${s.email}</span></p>
+            </td>
+            <td class="py-3.5 px-2 font-extrabold ${s.average_score !== null && s.average_score < 10 ? 'text-rose-600' : 'text-slate-900'}">
+              ${s.average_score !== null ? s.average_score + ' / 20' : '-'}
+            </td>
+            <td class="py-3.5 px-2 text-xs font-semibold ${s.recent_trend < 0 ? 'text-rose-600' : 'text-emerald-600'}">
+              ${s.recent_trend >= 0 ? '+' : ''}${s.recent_trend} pt(s)
+            </td>
+            <td class="py-3.5 px-2 text-xs font-medium text-slate-700">${s.weakest_course}</td>
+            <td class="py-3.5 px-2">
+              <span class="text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeClass}">${s.risk_level}</span>
+            </td>
+            <td class="py-3.5 px-2 text-xs text-slate-600 max-w-md leading-relaxed">${s.recommendation}</td>
+          </tr>
+        `;
+      }).join('') || `<tr><td colspan="6" class="py-8 text-center text-xs text-slate-400">Aucun étudiant n'est encore enregistré dans cet établissement.</td></tr>`;
+
+      const feed = document.getElementById('teach-xapi-feed');
+      feed.innerHTML = data.recent_statements.map(st => `
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+          <span><strong>${st.student_name}</strong> a obtenu <strong>${st.score_raw}/20</strong> en <em>${st.course_name}</em></span>
+          <span class="text-slate-400 font-mono text-[11px]">${st.timestamp}</span>
+        </div>
+      `).join('') || `<p class="py-4 text-center text-xs text-slate-400">Aucune trace xAPI enregistrée pour le moment.</p>`;
+    }
+
+    // ================= LOGIQUE PAGE ADMIN ÉCOLE =================
+    async function loadAdminDashboard() {
+      await loadStackInfo();
+      if (stackInfo) {
+        const pct = Math.min(100, Math.round((stackInfo.current_users / stackInfo.max_users) * 100));
+        document.getElementById('admin-quota-label').textContent = `${stackInfo.current_users} / ${stackInfo.max_users} utilisateurs (${pct}%)`;
+        document.getElementById('admin-quota-bar').style.width = `${pct}%`;
+      }
+
+      const res = await fetch('/api/admin/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const users = await res.json();
+
+      const tbody = document.getElementById('admin-users-tbody');
+      tbody.innerHTML = users.map(u => `
+        <tr>
+          <td class="py-3 px-2">
+            <p class="font-semibold text-slate-900">${u.full_name}</p>
+            <p class="text-xs text-indigo-600 font-medium">${u.class_name || 'Générale'}</p>
+          </td>
+          <td class="py-3 px-2 text-xs text-slate-600">${u.email}</td>
+          <td class="py-3 px-2">
+            <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+              u.role === 'ADMIN' ? 'bg-amber-100 text-amber-800' :
+              u.role === 'ENSEIGNANT' ? 'bg-emerald-100 text-emerald-700' :
+              'bg-indigo-100 text-indigo-700'
+            }">${u.role}</span>
+          </td>
+          <td class="py-3 px-2 text-right">
+            ${!u.is_primary_admin ? `<button onclick="deleteSchoolUser(${u.id})" class="text-xs font-semibold text-rose-600 hover:underline">Supprimer</button>` : '<span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-500">Admin Principal</span>'}
+          </td>
+        </tr>
+      `).join('') || `<tr><td colspan="4" class="py-6 text-center text-xs text-slate-400">Aucun utilisateur.</td></tr>`;
+    }
+
+    async function handleAdminCreateUser(e) {
+      e.preventDefault();
+      const full_name = document.getElementById('new-user-name').value.trim();
+      const email = document.getElementById('new-user-email').value.trim();
+      const role = document.getElementById('new-user-role').value;
+      const class_name = document.getElementById('new-user-class').value.trim() || 'Générale';
+      const password = document.getElementById('new-user-pass').value;
+      const msgEl = document.getElementById('admin-create-msg');
+
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ full_name, email, role, class_name, password })
+      });
+      const data = await res.json();
+      msgEl.classList.remove('hidden');
+
+      if (!res.ok) {
+        msgEl.className = 'text-xs p-3 rounded-xl bg-rose-50 text-rose-700 font-medium';
+        msgEl.textContent = data.detail || 'Erreur lors de la création.';
+        return;
+      }
+
+      msgEl.className = 'text-xs p-3 rounded-xl bg-emerald-50 text-emerald-700 font-medium';
+      msgEl.textContent = `✓ Compte ${role} créé pour ${full_name} (${class_name}).`;
+      document.getElementById('new-user-name').value = '';
+      document.getElementById('new-user-email').value = '';
+      document.getElementById('new-user-class').value = '';
+      loadAdminDashboard();
+    }
+
+    async function deleteSchoolUser(id) {
+      if (!confirm("Supprimer cet utilisateur de l'établissement ?")) return;
+      await fetch(`/api/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      loadAdminDashboard();
+    }
+
+    (async function init() {
+      await loadStackInfo();
+      routeByRole();
+    })();
+  </script>
+</body>
+</html>

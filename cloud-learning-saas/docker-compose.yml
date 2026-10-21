@@ -1,0 +1,77 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: saas-traefik
+    environment:
+      DOCKER_API_VERSION: "1.45"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=saas-public-net"
+      - "--entrypoints.web.address=:8000"
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - saas-public-net
+    restart: unless-stopped
+
+  portal-db:
+    image: postgres:16-alpine
+    container_name: saas-portal-db
+    environment:
+      POSTGRES_USER: portal_user
+      POSTGRES_PASSWORD: portal_password
+      POSTGRES_DB: portal_db
+    volumes:
+      - portal_db_data:/var/lib/postgresql/data
+    networks:
+      - portal-internal-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portal_user -d portal_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  portal-api:
+    build: ./portal
+    container_name: saas-portal-api
+    environment:
+      DATABASE_URL: postgresql://portal_user:portal_password@portal-db:5432/portal_db
+      SUPERADMIN_EMAIL: superadmin@cloudproject.mnbll.fr
+      SUPERADMIN_PASSWORD: SuperSecretPassword123!
+      BASE_DOMAIN: cloudproject.mnbll.fr
+      PUBLIC_PORT: "8000"
+      TENANT_COMPOSE_PATH: /app/tenant-stack/docker-compose.tenant.yml
+    ports:
+      - "8001:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./tenant-stack:/app/tenant-stack
+    depends_on:
+      portal-db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=saas-public-net"
+      - "traefik.http.routers.portal.rule=Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
+      - "traefik.http.routers.portal.entrypoints=web"
+      - "traefik.http.services.portal.loadbalancer.server.port=8000"
+    networks:
+      - saas-public-net
+      - portal-internal-net
+    restart: unless-stopped
+
+networks:
+  saas-public-net:
+    name: saas-public-net
+    driver: bridge
+  portal-internal-net:
+    driver: bridge
+
+volumes:
+  portal_db_data:

@@ -1,0 +1,56 @@
+services:
+  tenant-db:
+    image: postgres:16-alpine
+    container_name: ${TENANT_SLUG}-db
+    environment:
+      POSTGRES_USER: tenant_user
+      POSTGRES_PASSWORD: tenant_password
+      POSTGRES_DB: tenant_db
+    volumes:
+      - tenant_db_data:/var/lib/postgresql/data
+    networks:
+      - tenant-internal-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tenant_user -d tenant_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  tenant-app:
+    build: .
+    image: edupulse-tenant-app:latest
+    container_name: ${TENANT_SLUG}-app
+    environment:
+      DATABASE_URL: postgresql://tenant_user:tenant_password@tenant-db:5432/tenant_db
+      TENANT_SLUG: ${TENANT_SLUG}
+      INSTITUTION_NAME: "${INSTITUTION_NAME}"
+      MAX_USERS: ${MAX_USERS:-200}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD_HASH: "${ADMIN_PASSWORD_HASH}"
+      ADMIN_FULL_NAME: "${ADMIN_FULL_NAME:-Administrateur Principal}"
+      JWT_SECRET: "${JWT_SECRET:-super-secret-tenant-key}"
+    ports:
+      - "${TENANT_PORT:-8101}:8000"
+    depends_on:
+      tenant-db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=saas-public-net"
+      - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-cloudproject.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
+      - "traefik.http.routers.${TENANT_SLUG}.entrypoints=web"
+      - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
+    networks:
+      - saas-public-net
+      - tenant-internal-net
+    restart: unless-stopped
+
+networks:
+  saas-public-net:
+    external: true
+  tenant-internal-net:
+    driver: bridge
+
+volumes:
+  tenant_db_data:
