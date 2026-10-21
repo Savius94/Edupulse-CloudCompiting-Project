@@ -1,11 +1,13 @@
 import os
+import csv
+import io
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import jwt
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException, Header, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
@@ -97,6 +99,9 @@ class CreateUserRequest(BaseModel):
     password: str
     role: str  # ADMIN, ENSEIGNANT, ETUDIANT
     class_name: Optional[str] = "Générale"
+
+class ImportCSVRequest(BaseModel):
+    csv_content: str
 
 class XAPIStatementInput(BaseModel):
     actor: Dict[str, Any]
@@ -403,6 +408,214 @@ def delete_user(user_id: int, current: User = Depends(get_current_user), db: Ses
     db.delete(target)
     db.commit()
     return {"status": "deleted"}
+
+
+def normalize_role_str(role_raw: str) -> Optional[str]:
+    clean = (role_raw or "").strip().lower()
+    if clean in ("etudiant", "étudiant", "student", "eleve", "élève", "apprenant"):
+        return "ETUDIANT"
+    if clean in ("enseignant", "prof", "professeur", "teacher", "professeure", "enseignante"):
+        return "ENSEIGNANT"
+    if clean in ("admin", "administrateur", "administratrice", "direction"):
+        return "ADMIN"
+    return None
+
+
+def normalize_csv_header(h: str) -> str:
+    clean = h.strip().lower().replace(" ", "_").replace("-", "_")
+    if clean in ("nom", "nom_complet", "full_name", "fullname", "nom_prenom", "name", "prenom_nom"):
+        return "full_name"
+    if clean in ("email", "courriel", "mail", "adresse_email"):
+        return "email"
+    if clean in ("role", "statut", "fonction", "type"):
+        return "role"
+    if clean in ("classe", "class_name", "classname", "promotion", "filiere", "groupe", "departement"):
+        return "class_name"
+    if clean in ("password", "mot_de_passe", "mdp", "pass"):
+        return "password"
+    return clean
+
+
+@app.post("/api/admin/users/import-csv")
+def import_users_csv(
+    req: ImportCSVRequest,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Accès réservé à l'administrateur")
+
+    raw_text = req.csv_content.strip()
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="Le fichier CSV est vide.")
+
+    # Nettoyage BOM UTF-8 éventuel
+    if raw_text.startswith("\ufeff"):
+        raw_text = raw_text[1:]
+
+    lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+    if not lines:
+        raise HTTPException(status_code=400, detail="Aucune ligne exploitable dans le fichier CSV.")
+
+    first_line = lines[0]
+    delimiter = ';' if first_line.count(';') > first_line.count(',') else ','
+
+    reader = csv.reader(io.StringIO(raw_text), delimiter=delimiter)
+    all_rows = [r for r in reader if any(cell.strip() for cell in r)]
+    if not all_rows:
+        raise HTTPException(status_code=400, detail="Aucune donnée trouvée dans le fichier CSV.")
+
+    # Détection automatique de l'en-tête
+    first_row = [c.strip() for c in all_rows[0]]
+    normalized_headers = [normalize_csv_header(c) for c in first_row]
+    has_header = any(h in ("full_name", "email", "role", "class_name") for h in normalized_headers)
+
+    col_map = {}
+    data_rows = []
+    if has_header:
+        for idx, h in enumerate(normalized_headers):
+            if h in ("full_name", "email", "role", "class_name", "password"):
+                col_map[h] = idx
+        data_rows = all_rows[1:]
+    else:
+        col_map = {
+            "full_name": 0,
+            "email": 1,
+            "role": 2,
+            "class_name": 3,
+            "password": 4
+        }
+        data_rows = all_rows
+
+    if "full_name" not in col_map or "email" not in col_map or "role" not in col_map:
+        raise HTTPException(
+            status_code=400,
+            detail="Colonnes requises manquantes dans le CSV. Le fichier doit comporter au minimum : Nom complet, Email, Rôle."
+        )
+
+    # Récupérer les emails existants dans la base
+    existing_emails = set(
+        e[0].lower() for e in db.query(User.email).all()
+    )
+    seen_in_csv = set()
+
+    users_to_add = []
+    skipped_duplicates = []
+    invalid_rows = []
+
+    for row_idx, row in enumerate(data_rows, start=2 if has_header else 1):
+        if not row or not any(c.strip() for c in row):
+            continue
+
+        def get_val(key: str, default: str = "") -> str:
+            idx = col_map.get(key)
+            if idx is not None and idx < len(row):
+                return row[idx].strip()
+            return default
+
+        full_name = get_val("full_name")
+        email = get_val("email").lower()
+        role_raw = get_val("role")
+        class_name = get_val("class_name", "Générale") or "Générale"
+        password = get_val("password", "Ecole123!") or "Ecole123!"
+
+        if not full_name:
+            invalid_rows.append({"line": row_idx, "email": email, "reason": "Nom complet manquant"})
+            continue
+
+        if not email or "@" not in email or "." not in email:
+            invalid_rows.append({"line": row_idx, "email": email, "reason": f"Format d'email invalide : '{email}'"})
+            continue
+
+        role_norm = normalize_role_str(role_raw)
+        if not role_norm:
+            invalid_rows.append({
+                "line": row_idx,
+                "email": email,
+                "reason": f"Rôle invalide '{role_raw}' (attendu : ETUDIANT, ENSEIGNANT ou ADMIN)"
+            })
+            continue
+
+        if email in existing_emails:
+            skipped_duplicates.append({"line": row_idx, "email": email, "full_name": full_name, "reason": "Déjà existant dans l'établissement"})
+            continue
+
+        if email in seen_in_csv:
+            skipped_duplicates.append({"line": row_idx, "email": email, "full_name": full_name, "reason": "Présent plusieurs fois dans le fichier CSV"})
+            continue
+
+        seen_in_csv.add(email)
+        users_to_add.append({
+            "full_name": full_name,
+            "email": email,
+            "role": role_norm,
+            "class_name": class_name,
+            "password": password
+        })
+
+    # VÉRIFICATION STRICTE DU QUOTA D'UTILISATEURS DU PLAN
+    current_count = db.query(func.count(User.id)).scalar() or 0
+    remaining_slots = MAX_USERS - current_count
+
+    if len(users_to_add) > remaining_slots:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Dépassement du quota souscrit : vous tentez d'ajouter {len(users_to_add)} utilisateur(s) valide(s), "
+                f"mais votre formule n'autorise plus que {remaining_slots} place(s) disponible(s) "
+                f"({current_count}/{MAX_USERS} comptes occupés). Veuillez réduire le fichier ou passer au plan supérieur sur le portail."
+            )
+        )
+
+    # Insertion des utilisateurs validés
+    created_list = []
+    for u in users_to_add:
+        new_u = User(
+            full_name=u["full_name"],
+            email=u["email"],
+            password_hash=pwd_context.hash(u["password"]),
+            role=u["role"],
+            class_name=u["class_name"]
+        )
+        db.add(new_u)
+        created_list.append(new_u)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "imported_count": len(created_list),
+        "skipped_duplicates_count": len(skipped_duplicates),
+        "skipped_duplicates": skipped_duplicates,
+        "invalid_count": len(invalid_rows),
+        "invalid_rows": invalid_rows,
+        "total_rows_processed": len(data_rows),
+        "current_users": current_count + len(created_list),
+        "max_users": MAX_USERS,
+        "remaining_slots": MAX_USERS - (current_count + len(created_list)),
+    }
+
+
+@app.get("/api/admin/users/csv-template")
+def get_csv_template(current: User = Depends(get_current_user)):
+    if current.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Accès réservé à l'administrateur")
+
+    csv_data = (
+        "full_name,email,role,class_name,password\n"
+        "Jean Dupont,jean.dupont@ecole.fr,ETUDIANT,M1 Cloud & DevOps,Ecole123!\n"
+        "Sophie Martin,sophie.martin@ecole.fr,ENSEIGNANT,Département Informatique,Prof123!\n"
+        "Claire Moreau,claire.moreau@ecole.fr,ETUDIANT,L3 Informatique,Ecole123!\n"
+        "Lucas Bernard,lucas.bernard@ecole.fr,ETUDIANT,M1 Cloud & DevOps,Ecole123!\n"
+        "Marc Lefevre,marc.lefevre@ecole.fr,ADMIN,Direction / Scolarité,AdminPass123!\n"
+    )
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=modele_utilisateurs_edupulse.csv"
+        }
+    )
 
 
 # ================= VUE 2 : LRS xAPI & ESPACE ÉTUDIANT =================
