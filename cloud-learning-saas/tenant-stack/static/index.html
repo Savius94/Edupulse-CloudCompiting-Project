@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Espace Établissement — EduPulse</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
 
@@ -133,6 +134,43 @@
         </div>
       </div>
 
+      <!-- ================= GRAPHIQUE D'ÉVOLUTION DE L'ÉTUDIANT ================= -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Progression Temporelle</span>
+              <span id="stu-chart-count-badge" class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold">0 note(s)</span>
+            </div>
+            <h3 class="text-lg font-bold text-slate-900 mt-0.5">Évolution chronologique de mes notes</h3>
+          </div>
+          <!-- Filtre par matière pour l'étudiant -->
+          <div class="flex items-center gap-2">
+            <label class="text-xs font-semibold text-slate-600">Matière :</label>
+            <select id="stu-chart-filter-course" onchange="renderStudentChart()" class="text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-300 bg-white">
+              <option value="ALL">Toutes mes matières</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Canvas du graphique étudiant -->
+        <div id="stu-chart-container" class="relative w-full h-64 sm:h-72">
+          <canvas id="studentProgressionChart"></canvas>
+        </div>
+        <div id="stu-chart-empty" class="hidden py-12 text-center text-xs text-slate-400">
+          Aucune note enregistrée pour tracer votre graphique. Saisissez votre première note ci-dessous !
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-100">
+          <div class="flex flex-wrap items-center gap-4">
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-indigo-600 rounded inline-block"></span> Mes notes obtenues</span>
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-emerald-500 rounded inline-block"></span> Moyenne générale</span>
+            <span class="flex items-center gap-1.5"><span class="w-3.5 h-0.5 border-t-2 border-dashed border-rose-500 inline-block"></span> Seuil de validation (10/20)</span>
+          </div>
+          <span id="stu-chart-detail-summary" class="font-medium text-slate-600">--</span>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <!-- Formulaire d'envoi d'une note (Génère un Statement xAPI) -->
         <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
@@ -216,6 +254,116 @@
         </div>
       </div>
 
+      <!-- ================= SECTION ANALYTIQUE VISUELLE & GRAPHIQUES (ENSEIGNANT) ================= -->
+      <div id="teacher-analytics-card" class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+        <!-- En-tête avec titre, explication et filtres -->
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-emerald-600">Analytique Graphique Interactive</span>
+              <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold">Temps Réel</span>
+            </div>
+            <h3 class="text-xl font-bold text-slate-900 mt-1">Évolution des notes & Comparateur de progressions</h3>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Visualisez les trajectoires individuelles, comparez plusieurs élèves sur la même courbe, ou analysez la moyenne globale.
+            </p>
+          </div>
+
+          <!-- Filtres Promotion & Matière -->
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-semibold text-slate-600">Promotion :</label>
+              <select id="teacher-filter-class" onchange="onTeacherFilterChange()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white">
+                <option value="ALL">Toutes les promotions</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-semibold text-slate-600">Matière :</label>
+              <select id="teacher-filter-course" onchange="onTeacherFilterChange()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white">
+                <option value="ALL">Toutes les matières</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Onglets / Modes de visualisation -->
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="setTeacherChartMode('compare')" id="btn-mode-compare"
+            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm">
+            <span>👥 Comparateur d'élèves</span>
+          </button>
+          <button onclick="setTeacherChartMode('class_trend')" id="btn-mode-class_trend"
+            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
+            <span>📈 Évolution moyenne classe</span>
+          </button>
+          <button onclick="setTeacherChartMode('single_student')" id="btn-mode-single_student"
+            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
+            <span>👤 Focus élève</span>
+          </button>
+          <button onclick="setTeacherChartMode('courses')" id="btn-mode-courses"
+            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
+            <span>📊 Moyennes par matière</span>
+          </button>
+          <button onclick="setTeacherChartMode('distribution')" id="btn-mode-distribution"
+            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
+            <span>🎯 Distribution & Risques</span>
+          </button>
+        </div>
+
+        <!-- Sous-contrôles : Mode Comparateur (Sélection des élèves par pastilles) -->
+        <div id="subcontrols-compare" class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span class="text-xs font-bold text-slate-700">Élèves affichés sur le graphique (cliquez pour activer/désactiver) :</span>
+            <div class="flex flex-wrap items-center gap-2">
+              <button onclick="toggleAllCompare(true)" class="text-[11px] font-semibold text-emerald-700 hover:underline">Tout cocher</button>
+              <span class="text-slate-300">|</span>
+              <button onclick="toggleAllCompare(false)" class="text-[11px] font-semibold text-slate-500 hover:underline">Tout décocher</button>
+              <span class="text-slate-300">|</span>
+              <button onclick="selectExtremeStudents()" class="text-[11px] font-semibold text-indigo-600 hover:underline">Écarts extrêmes (Major vs Décrocheur)</button>
+              <span class="text-slate-300">|</span>
+              <button onclick="selectAtRiskStudents()" class="text-[11px] font-semibold text-rose-600 hover:underline">Élèves en risque</button>
+            </div>
+          </div>
+          <div id="compare-student-chips" class="flex flex-wrap gap-2 pt-1 max-h-36 overflow-y-auto"></div>
+        </div>
+
+        <!-- Sous-contrôles : Mode Focus Élève individuel -->
+        <div id="subcontrols-single" class="hidden p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center gap-3">
+          <label class="text-xs font-bold text-slate-700">Sélectionner un étudiant :</label>
+          <select id="select-single-student" onchange="renderTeacherChart()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white min-w-[240px]">
+          </select>
+          <span id="single-student-info" class="text-xs font-bold px-3 py-1 rounded-full"></span>
+        </div>
+
+        <!-- Zone du Graphique Principal -->
+        <div id="teacher-chart-wrapper" class="relative w-full h-80 sm:h-96">
+          <canvas id="teacherMainChart"></canvas>
+        </div>
+        <div id="teacher-chart-empty" class="hidden py-16 text-center text-xs text-slate-400">
+          Aucune trace de note disponible pour les filtres sélectionnés.
+        </div>
+
+        <!-- 4 Indicateurs contextuels sous le graphique -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100 text-xs">
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+            <span class="text-slate-500 block text-[11px]">Taux de réussite (&ge; 10/20)</span>
+            <strong id="kpi-chart-pass-rate" class="text-slate-900 text-base font-extrabold">--%</strong>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+            <span class="text-slate-500 block text-[11px]">Note la plus haute</span>
+            <strong id="kpi-chart-max" class="text-emerald-600 text-base font-extrabold">--/20</strong>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+            <span class="text-slate-500 block text-[11px]">Note la plus basse</span>
+            <strong id="kpi-chart-min" class="text-rose-600 text-base font-extrabold">--/20</strong>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+            <span class="text-slate-500 block text-[11px]">Matière la plus fragile</span>
+            <strong id="kpi-chart-weakest" class="text-amber-800 text-base font-extrabold truncate block">--</strong>
+          </div>
+        </div>
+      </div>
+
       <!-- Tableau d'analyse et solutions proposées -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <h3 class="text-base font-bold text-slate-900 mb-4">Diagnostic par étudiant et solutions pédagogiques proposées</h3>
@@ -229,6 +377,7 @@
                 <th class="py-3 px-2">Matière fragile</th>
                 <th class="py-3 px-2">Niveau de risque</th>
                 <th class="py-3 px-2">Solution proposée par l'algorithme</th>
+                <th class="py-3 px-2 text-right">Graphique</th>
               </tr>
             </thead>
             <tbody id="teach-students-tbody" class="divide-y divide-slate-100"></tbody>
@@ -412,6 +561,8 @@
     }
 
     function logout() {
+      if (teacherChartInstance) { teacherChartInstance.destroy(); teacherChartInstance = null; }
+      if (studentChartInstance) { studentChartInstance.destroy(); studentChartInstance = null; }
       token = null;
       currentUser = null;
       localStorage.removeItem('tenant_token');
@@ -447,6 +598,9 @@
     }
 
     function routeByRole() {
+      if (teacherChartInstance) { teacherChartInstance.destroy(); teacherChartInstance = null; }
+      if (studentChartInstance) { studentChartInstance.destroy(); studentChartInstance = null; }
+
       ['view-login', 'view-student', 'view-teacher', 'view-admin'].forEach(id => {
         document.getElementById(id).classList.add('hidden');
       });
@@ -475,6 +629,25 @@
       }
     }
 
+    // ================= PALETTE DE COULEURS & ÉTATS GRAPHIQUES =================
+    const CHART_PALETTE = [
+      '#4f46e5', '#059669', '#e11d48', '#d97706', '#0284c7',
+      '#7c3aed', '#0d9488', '#ea580c', '#db2777', '#0891b2',
+      '#65a30d', '#9333ea', '#2563eb', '#ca8a04'
+    ];
+
+    function getStudentColor(id) {
+      return CHART_PALETTE[Math.abs(id || 0) % CHART_PALETTE.length];
+    }
+
+    let studentDashboardData = null;
+    let studentChartInstance = null;
+
+    let teacherChartRaw = null;
+    let teacherChartInstance = null;
+    let teacherChartMode = 'compare'; // 'compare' | 'class_trend' | 'single_student' | 'courses' | 'distribution'
+    let selectedStudentIds = new Set();
+
     // ================= LOGIQUE PAGE ÉTUDIANT & xAPI =================
     async function loadStudentDashboard() {
       const res = await fetch('/api/student/me', {
@@ -482,6 +655,7 @@
       });
       if (!res.ok) return;
       const data = await res.json();
+      studentDashboardData = data;
 
       const className = data.student.class_name ? ` (${data.student.class_name})` : '';
       document.getElementById('student-welcome').textContent = `Bonjour ${data.student.full_name}${className}`;
@@ -498,6 +672,18 @@
         'bg-emerald-100 text-emerald-700'
       );
 
+      // Peupler le filtre matière étudiant
+      const courseFilter = document.getElementById('stu-chart-filter-course');
+      const curCourse = courseFilter.value;
+      const distinctCourses = Array.from(new Set(data.statements.map(s => s.course_name))).sort();
+      courseFilter.innerHTML = '<option value="ALL">Toutes mes matières</option>' +
+        distinctCourses.map(c => `<option value="${c}">${c}</option>`).join('');
+      if (distinctCourses.includes(curCourse)) {
+        courseFilter.value = curCourse;
+      }
+
+      renderStudentChart();
+
       const list = document.getElementById('stu-statements-list');
       list.innerHTML = data.statements.map(s => `
         <details class="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
@@ -508,6 +694,153 @@
           <pre class="mt-3 p-3 rounded-lg bg-slate-900 text-emerald-400 text-[11px] overflow-x-auto">${JSON.stringify(s.raw_xapi, null, 2)}</pre>
         </details>
       `).join('') || `<p class="text-xs text-slate-400 py-6 text-center">Aucune note enregistrée.</p>`;
+    }
+
+    function renderStudentChart() {
+      if (!studentDashboardData || !studentDashboardData.statements) return;
+
+      if (studentChartInstance) {
+        studentChartInstance.destroy();
+        studentChartInstance = null;
+      }
+
+      const courseFilter = document.getElementById('stu-chart-filter-course').value;
+      let stmts = [...studentDashboardData.statements];
+      if (courseFilter !== 'ALL') {
+        stmts = stmts.filter(s => s.course_name === courseFilter);
+      }
+
+      const countBadge = document.getElementById('stu-chart-count-badge');
+      const detailSummary = document.getElementById('stu-chart-detail-summary');
+      const container = document.getElementById('stu-chart-container');
+      const emptyMsg = document.getElementById('stu-chart-empty');
+
+      if (stmts.length === 0) {
+        container.classList.add('hidden');
+        emptyMsg.classList.remove('hidden');
+        countBadge.textContent = '0 note';
+        detailSummary.textContent = 'Aucune donnée disponible pour cette matière';
+        return;
+      }
+
+      container.classList.remove('hidden');
+      emptyMsg.classList.add('hidden');
+      countBadge.textContent = `${stmts.length} note(s)`;
+
+      stmts.sort((a, b) => new Date(a.iso_timestamp || a.timestamp) - new Date(b.iso_timestamp || b.timestamp));
+
+      const points = stmts.map(s => ({
+        x: new Date(s.iso_timestamp || s.timestamp).getTime(),
+        y: s.score_raw,
+        course: s.course_name,
+        verb: s.verb,
+        date: s.date || s.timestamp
+      }));
+
+      const scores = points.map(p => p.y);
+      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+      const minScore = Math.min(...scores);
+      const maxScore = Math.max(...scores);
+      detailSummary.textContent = `Moyenne : ${avg.toFixed(2)}/20 (Min: ${minScore}/20, Max: ${maxScore}/20)`;
+
+      const minX = points[0].x;
+      const maxX = points[points.length - 1].x;
+      const xSpan = maxX > minX ? (maxX - minX) * 0.05 : 86400000;
+
+      const datasets = [
+        {
+          label: 'Mes notes obtenues',
+          data: points,
+          borderColor: '#4f46e5',
+          backgroundColor: 'rgba(79, 70, 229, 0.1)',
+          fill: true,
+          tension: 0.3,
+          borderWidth: 2.5,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#4f46e5',
+        },
+        {
+          label: `Moyenne (${avg.toFixed(2)}/20)`,
+          data: [
+            { x: minX - xSpan, y: +avg.toFixed(2) },
+            { x: maxX + xSpan, y: +avg.toFixed(2) }
+          ],
+          borderColor: '#059669',
+          borderDash: [5, 5],
+          borderWidth: 1.8,
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Seuil de validation (10/20)',
+          data: [
+            { x: minX - xSpan, y: 10 },
+            { x: maxX + xSpan, y: 10 }
+          ],
+          borderColor: '#f43f5e',
+          borderDash: [3, 3],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+        }
+      ];
+
+      const ctx = document.getElementById('studentProgressionChart').getContext('2d');
+      studentChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 12 },
+              padding: 10,
+              cornerRadius: 10,
+              callbacks: {
+                title: (items) => {
+                  if (!items.length) return '';
+                  const d = new Date(items[0].parsed.x);
+                  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+                },
+                label: (ctx) => {
+                  const raw = ctx.raw;
+                  if (raw && raw.course) {
+                    return `Note : ${raw.y} / 20 en ${raw.course}`;
+                  }
+                  return `${ctx.dataset.label} : ${ctx.parsed.y} / 20`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              type: 'linear',
+              min: minX - xSpan,
+              max: maxX + xSpan,
+              grid: { color: '#f1f5f9' },
+              ticks: {
+                callback: (val) => new Date(val).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+                maxTicksLimit: 7,
+                color: '#64748b',
+                font: { size: 11 }
+              }
+            },
+            y: {
+              min: 0,
+              max: 20,
+              ticks: { stepSize: 2, color: '#64748b', font: { size: 11 } },
+              grid: { color: '#f1f5f9' }
+            }
+          }
+        }
+      });
     }
 
     async function handleSendXAPI(e) {
@@ -559,7 +892,7 @@
       }
     }
 
-    // ================= LOGIQUE PAGE ENSEIGNANT =================
+    // ================= LOGIQUE PAGE ENSEIGNANT & ANALYTIQUE GRAPHIQUE =================
     async function loadTeacherDashboard() {
       const res = await fetch('/api/teacher/analytics', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -597,9 +930,15 @@
               <span class="text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeClass}">${s.risk_level}</span>
             </td>
             <td class="py-3.5 px-2 text-xs text-slate-600 max-w-md leading-relaxed">${s.recommendation}</td>
+            <td class="py-3.5 px-2 text-right">
+              <button onclick="focusStudentChart(${s.student_id})" title="Voir la trajectoire de cet élève"
+                class="text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition inline-flex items-center gap-1 cursor-pointer">
+                <span>📊 Graphique</span>
+              </button>
+            </td>
           </tr>
         `;
-      }).join('') || `<tr><td colspan="6" class="py-8 text-center text-xs text-slate-400">Aucun étudiant n'est encore enregistré dans cet établissement.</td></tr>`;
+      }).join('') || `<tr><td colspan="7" class="py-8 text-center text-xs text-slate-400">Aucun étudiant n'est encore enregistré dans cet établissement.</td></tr>`;
 
       const feed = document.getElementById('teach-xapi-feed');
       feed.innerHTML = data.recent_statements.map(st => `
@@ -608,6 +947,658 @@
           <span class="text-slate-400 font-mono text-[11px]">${st.timestamp}</span>
         </div>
       `).join('') || `<p class="py-4 text-center text-xs text-slate-400">Aucune trace xAPI enregistrée pour le moment.</p>`;
+
+      // Charger et afficher l'analytique graphique
+      await loadTeacherChartData();
+    }
+
+    async function loadTeacherChartData() {
+      const classVal = document.getElementById('teacher-filter-class').value;
+      const courseVal = document.getElementById('teacher-filter-course').value;
+
+      const params = new URLSearchParams();
+      if (classVal && classVal !== 'ALL') params.append('class_name', classVal);
+      if (courseVal && courseVal !== 'ALL') params.append('course_name', courseVal);
+
+      try {
+        const res = await fetch(`/api/teacher/chart-data?${params.toString()}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+        teacherChartRaw = await res.json();
+
+        // Mettre à jour les listes de filtres si vides
+        const classSelect = document.getElementById('teacher-filter-class');
+        if (classSelect.options.length <= 1 && teacherChartRaw.classes) {
+          teacherChartRaw.classes.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            classSelect.appendChild(opt);
+          });
+        }
+
+        const courseSelect = document.getElementById('teacher-filter-course');
+        if (courseSelect.options.length <= 1 && teacherChartRaw.courses) {
+          teacherChartRaw.courses.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            courseSelect.appendChild(opt);
+          });
+        }
+
+        // Si la sélection d'élèves est vide, pré-sélectionner jusqu'à 4 profils variés
+        if (selectedStudentIds.size === 0 && teacherChartRaw.students.length > 0) {
+          teacherChartRaw.students.slice(0, 4).forEach(s => selectedStudentIds.add(s.id));
+        }
+
+        renderCompareChips();
+        renderSingleStudentSelect();
+        renderTeacherChart();
+      } catch (e) {
+        console.error("Erreur chargement données graphiques enseignant :", e);
+      }
+    }
+
+    function onTeacherFilterChange() {
+      loadTeacherChartData();
+    }
+
+    function setTeacherChartMode(mode) {
+      teacherChartMode = mode;
+
+      document.querySelectorAll('.teacher-mode-btn').forEach(btn => {
+        btn.className = 'teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200';
+      });
+      const activeBtn = document.getElementById(`btn-mode-${mode}`);
+      if (activeBtn) {
+        activeBtn.className = 'teacher-mode-btn px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm';
+      }
+
+      const compSub = document.getElementById('subcontrols-compare');
+      const singSub = document.getElementById('subcontrols-single');
+
+      if (mode === 'compare') {
+        compSub.classList.remove('hidden');
+        singSub.classList.add('hidden');
+      } else if (mode === 'single_student') {
+        compSub.classList.add('hidden');
+        singSub.classList.remove('hidden');
+      } else {
+        compSub.classList.add('hidden');
+        singSub.classList.add('hidden');
+      }
+
+      renderTeacherChart();
+    }
+
+    function renderCompareChips() {
+      const container = document.getElementById('compare-student-chips');
+      if (!teacherChartRaw || !teacherChartRaw.students) return;
+
+      container.innerHTML = teacherChartRaw.students.map(s => {
+        const isSelected = selectedStudentIds.has(s.id);
+        const color = getStudentColor(s.id);
+        const badgeRisk = s.risk_level === 'CRITIQUE' ? '🔴' : (s.risk_level === 'VIGILANCE' ? '🟡' : '🟢');
+
+        return `
+          <button type="button" onclick="toggleCompareStudent(${s.id})"
+            class="px-2.5 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border cursor-pointer ${
+              isSelected
+                ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+            }">
+            <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: ${color};"></span>
+            <span>${badgeRisk} ${s.full_name}</span>
+            <span class="text-[10px] opacity-80">(${s.average_score !== null ? s.average_score + '/20' : '-'})</span>
+          </button>
+        `;
+      }).join('') || `<p class="text-xs text-slate-400">Aucun étudiant disponible.</p>`;
+    }
+
+    function toggleCompareStudent(id) {
+      if (selectedStudentIds.has(id)) {
+        selectedStudentIds.delete(id);
+      } else {
+        selectedStudentIds.add(id);
+      }
+      renderCompareChips();
+      renderTeacherChart();
+    }
+
+    function toggleAllCompare(enable) {
+      if (!teacherChartRaw || !teacherChartRaw.students) return;
+      selectedStudentIds.clear();
+      if (enable) {
+        teacherChartRaw.students.forEach(s => selectedStudentIds.add(s.id));
+      }
+      renderCompareChips();
+      renderTeacherChart();
+    }
+
+    function selectExtremeStudents() {
+      if (!teacherChartRaw || !teacherChartRaw.students) return;
+      const scored = teacherChartRaw.students.filter(s => s.average_score !== null);
+      if (scored.length === 0) return;
+      scored.sort((a, b) => a.average_score - b.average_score);
+      selectedStudentIds.clear();
+      selectedStudentIds.add(scored[0].id);
+      selectedStudentIds.add(scored[scored.length - 1].id);
+      renderCompareChips();
+      renderTeacherChart();
+    }
+
+    function selectAtRiskStudents() {
+      if (!teacherChartRaw || !teacherChartRaw.students) return;
+      selectedStudentIds.clear();
+      teacherChartRaw.students
+        .filter(s => s.risk_level === 'CRITIQUE' || s.risk_level === 'VIGILANCE')
+        .forEach(s => selectedStudentIds.add(s.id));
+      renderCompareChips();
+      renderTeacherChart();
+    }
+
+    function renderSingleStudentSelect() {
+      const select = document.getElementById('select-single-student');
+      if (!teacherChartRaw || !teacherChartRaw.students) return;
+      const curVal = select.value;
+      select.innerHTML = teacherChartRaw.students.map(s => `
+        <option value="${s.id}">
+          ${s.full_name} (${s.class_name}) — ${s.average_score !== null ? s.average_score + '/20' : 'Sans note'} [${s.risk_level}]
+        </option>
+      `).join('');
+      if (curVal && teacherChartRaw.students.some(s => s.id == curVal)) {
+        select.value = curVal;
+      }
+    }
+
+    function focusStudentChart(studentId) {
+      const select = document.getElementById('select-single-student');
+      if (select) {
+        select.value = studentId;
+      }
+      setTeacherChartMode('single_student');
+      const el = document.getElementById('teacher-analytics-card');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function renderTeacherChart() {
+      if (!teacherChartRaw) return;
+
+      if (teacherChartInstance) {
+        teacherChartInstance.destroy();
+        teacherChartInstance = null;
+      }
+
+      const wrapper = document.getElementById('teacher-chart-wrapper');
+      const emptyMsg = document.getElementById('teacher-chart-empty');
+      const stats = teacherChartRaw.overall_stats || {};
+
+      document.getElementById('kpi-chart-pass-rate').textContent = `${stats.pass_rate || 0}%`;
+      document.getElementById('kpi-chart-max').textContent = `${stats.highest_score || 0} / 20`;
+      document.getElementById('kpi-chart-min').textContent = `${stats.lowest_score || 0} / 20`;
+
+      let weakestCourse = '-';
+      if (teacherChartRaw.course_stats) {
+        const entries = Object.entries(teacherChartRaw.course_stats);
+        if (entries.length > 0) {
+          entries.sort((a, b) => a[1].average - b[1].average);
+          weakestCourse = `${entries[0][0]} (${entries[0][1].average}/20)`;
+        }
+      }
+      document.getElementById('kpi-chart-weakest').textContent = weakestCourse;
+
+      const stmts = teacherChartRaw.statements || [];
+
+      if (stmts.length === 0 && teacherChartMode !== 'courses' && teacherChartMode !== 'distribution') {
+        wrapper.classList.add('hidden');
+        emptyMsg.classList.remove('hidden');
+        return;
+      }
+      wrapper.classList.remove('hidden');
+      emptyMsg.classList.add('hidden');
+
+      const ctx = document.getElementById('teacherMainChart').getContext('2d');
+
+      // -------------------------------------------------------------
+      // MODE 1 : COMPARATEUR D'ÉLÈVES
+      // -------------------------------------------------------------
+      if (teacherChartMode === 'compare') {
+        const datasets = [];
+
+        teacherChartRaw.students.forEach(s => {
+          if (!selectedStudentIds.has(s.id)) return;
+          const stuStmts = stmts.filter(st => st.student_id === s.id);
+          if (stuStmts.length === 0) return;
+
+          const points = stuStmts.map(st => ({
+            x: new Date(st.iso_timestamp || st.timestamp).getTime(),
+            y: st.score_raw,
+            course: st.course_name,
+            verb: st.verb,
+            studentName: s.full_name
+          }));
+
+          const color = getStudentColor(s.id);
+          datasets.push({
+            label: s.full_name,
+            data: points,
+            borderColor: color,
+            backgroundColor: color + '20',
+            borderWidth: 2.2,
+            tension: 0.3,
+            pointRadius: 4.5,
+            pointHoverRadius: 7,
+            pointBackgroundColor: color,
+            fill: false
+          });
+        });
+
+        if (stmts.length > 0) {
+          const dateMap = {};
+          stmts.forEach(st => {
+            const ts = new Date(st.iso_timestamp || st.timestamp).getTime();
+            const bucketKey = Math.round(ts / (3 * 86400000)) * (3 * 86400000);
+            if (!dateMap[bucketKey]) dateMap[bucketKey] = [];
+            dateMap[bucketKey].push(st.score_raw);
+          });
+          const avgPoints = Object.entries(dateMap).map(([k, vals]) => ({
+            x: parseInt(k),
+            y: +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)
+          })).sort((a, b) => a.x - b.x);
+
+          datasets.push({
+            label: `Moyenne Promotion (${stats.overall_average}/20)`,
+            data: avgPoints,
+            borderColor: '#64748b',
+            borderDash: [6, 4],
+            borderWidth: 2,
+            pointRadius: 3.5,
+            pointBackgroundColor: '#64748b',
+            fill: false
+          });
+
+          const allTimestamps = stmts.map(st => new Date(st.iso_timestamp || st.timestamp).getTime());
+          const minX = Math.min(...allTimestamps);
+          const maxX = Math.max(...allTimestamps);
+          const xSpan = (maxX - minX) * 0.04 || 86400000;
+
+          datasets.push({
+            label: 'Seuil 10/20',
+            data: [{ x: minX - xSpan, y: 10 }, { x: maxX + xSpan, y: 10 }],
+            borderColor: '#f43f5e',
+            borderDash: [3, 3],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            fill: false
+          });
+        }
+
+        teacherChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: { datasets },
+          options: getLineChartOptions('Trajectoires individuelles & Moyenne')
+        });
+
+      // -------------------------------------------------------------
+      // MODE 2 : ÉVOLUTION GLOBALE CLASSE
+      // -------------------------------------------------------------
+      } else if (teacherChartMode === 'class_trend') {
+        const dateMap = {};
+        stmts.forEach(st => {
+          const ts = new Date(st.iso_timestamp || st.timestamp).getTime();
+          const bucketKey = Math.round(ts / (3 * 86400000)) * (3 * 86400000);
+          if (!dateMap[bucketKey]) dateMap[bucketKey] = [];
+          dateMap[bucketKey].push(st.score_raw);
+        });
+
+        const sortedBuckets = Object.entries(dateMap).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+        const avgPoints = sortedBuckets.map(([k, vals]) => ({
+          x: parseInt(k),
+          y: +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2),
+          count: vals.length
+        }));
+        const maxPoints = sortedBuckets.map(([k, vals]) => ({
+          x: parseInt(k),
+          y: Math.max(...vals)
+        }));
+        const minPoints = sortedBuckets.map(([k, vals]) => ({
+          x: parseInt(k),
+          y: Math.min(...vals)
+        }));
+
+        const allTimestamps = stmts.map(st => new Date(st.iso_timestamp || st.timestamp).getTime());
+        const minX = Math.min(...allTimestamps);
+        const maxX = Math.max(...allTimestamps);
+        const xSpan = (maxX - minX) * 0.04 || 86400000;
+
+        teacherChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            datasets: [
+              {
+                label: 'Moyenne de la promotion',
+                data: avgPoints,
+                borderColor: '#059669',
+                backgroundColor: 'rgba(5, 150, 105, 0.12)',
+                fill: true,
+                tension: 0.3,
+                borderWidth: 3,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointBackgroundColor: '#059669'
+              },
+              {
+                label: 'Note la plus haute de la période',
+                data: maxPoints,
+                borderColor: '#10b981',
+                borderDash: [4, 4],
+                borderWidth: 1.5,
+                pointRadius: 3,
+                fill: false
+              },
+              {
+                label: 'Note la plus basse de la période',
+                data: minPoints,
+                borderColor: '#f43f5e',
+                borderDash: [4, 4],
+                borderWidth: 1.5,
+                pointRadius: 3,
+                fill: false
+              },
+              {
+                label: 'Seuil de validation (10/20)',
+                data: [{ x: minX - xSpan, y: 10 }, { x: maxX + xSpan, y: 10 }],
+                borderColor: '#94a3b8',
+                borderDash: [3, 3],
+                borderWidth: 1.2,
+                pointRadius: 0,
+                fill: false
+              }
+            ]
+          },
+          options: getLineChartOptions('Évolution globale de la promotion')
+        });
+
+      // -------------------------------------------------------------
+      // MODE 3 : FOCUS ÉLÈVE INDIVIDUEL
+      // -------------------------------------------------------------
+      } else if (teacherChartMode === 'single_student') {
+        const studentSelect = document.getElementById('select-single-student');
+        const studentId = parseInt(studentSelect.value);
+        const student = teacherChartRaw.students.find(s => s.id === studentId) || teacherChartRaw.students[0];
+
+        const badgeEl = document.getElementById('single-student-info');
+        if (student) {
+          badgeEl.textContent = `Niveau : ${student.risk_level} (${student.average_score !== null ? student.average_score + '/20' : '-'})`;
+          badgeEl.className = 'text-xs font-bold px-3 py-1 rounded-full ' + (
+            student.risk_level === 'CRITIQUE' ? 'bg-rose-100 text-rose-700' :
+            student.risk_level === 'VIGILANCE' ? 'bg-amber-100 text-amber-800' :
+            'bg-emerald-100 text-emerald-700'
+          );
+        }
+
+        const stuStmts = stmts.filter(st => st.student_id === (student ? student.id : -1));
+        const color = student ? getStudentColor(student.id) : '#4f46e5';
+
+        const points = stuStmts.map(st => ({
+          x: new Date(st.iso_timestamp || st.timestamp).getTime(),
+          y: st.score_raw,
+          course: st.course_name,
+          verb: st.verb
+        }));
+
+        const datasets = [];
+        if (points.length > 0) {
+          const minX = points[0].x;
+          const maxX = points[points.length - 1].x;
+          const xSpan = (maxX - minX) * 0.05 || 86400000;
+
+          datasets.push({
+            label: `Notes de ${student ? student.full_name : 'l\'élève'}`,
+            data: points,
+            borderColor: color,
+            backgroundColor: color + '1a',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 2.8,
+            pointRadius: 5.5,
+            pointHoverRadius: 8,
+            pointBackgroundColor: color
+          });
+
+          if (student && student.average_score !== null) {
+            datasets.push({
+              label: `Moyenne personnelle (${student.average_score}/20)`,
+              data: [{ x: minX - xSpan, y: student.average_score }, { x: maxX + xSpan, y: student.average_score }],
+              borderColor: color,
+              borderDash: [5, 5],
+              borderWidth: 1.8,
+              pointRadius: 0,
+              fill: false
+            });
+          }
+
+          datasets.push({
+            label: `Moyenne promotion (${stats.overall_average}/20)`,
+            data: [{ x: minX - xSpan, y: stats.overall_average }, { x: maxX + xSpan, y: stats.overall_average }],
+            borderColor: '#64748b',
+            borderDash: [6, 4],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            fill: false
+          });
+
+          datasets.push({
+            label: 'Seuil 10/20',
+            data: [{ x: minX - xSpan, y: 10 }, { x: maxX + xSpan, y: 10 }],
+            borderColor: '#f43f5e',
+            borderDash: [3, 3],
+            borderWidth: 1.2,
+            pointRadius: 0,
+            fill: false
+          });
+        }
+
+        teacherChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: { datasets },
+          options: getLineChartOptions(student ? `Trajectoire de ${student.full_name}` : 'Trajectoire élève')
+        });
+
+      // -------------------------------------------------------------
+      // MODE 4 : MOYENNES PAR MATIÈRE
+      // -------------------------------------------------------------
+      } else if (teacherChartMode === 'courses') {
+        const cStats = teacherChartRaw.course_stats || {};
+        const labels = Object.keys(cStats);
+        const dataVals = labels.map(l => cStats[l].average);
+        const passRates = labels.map(l => cStats[l].pass_rate);
+        const counts = labels.map(l => cStats[l].count);
+
+        const bgColors = dataVals.map(v => (
+          v >= 12 ? 'rgba(16, 185, 129, 0.85)' :
+          v >= 10 ? 'rgba(245, 158, 11, 0.85)' :
+          'rgba(244, 63, 94, 0.85)'
+        ));
+        const borderColors = dataVals.map(v => (
+          v >= 12 ? '#059669' :
+          v >= 10 ? '#d97706' :
+          '#e11d48'
+        ));
+
+        teacherChartInstance = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Moyenne par matière',
+              data: dataVals,
+              backgroundColor: bgColors,
+              borderColor: borderColors,
+              borderWidth: 1.5,
+              borderRadius: 8,
+              passRates: passRates,
+              counts: counts
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#0f172a',
+                padding: 10,
+                cornerRadius: 10,
+                callbacks: {
+                  label: (ctx) => {
+                    const ds = ctx.dataset;
+                    const idx = ctx.dataIndex;
+                    return [
+                      `Moyenne : ${ctx.parsed.y} / 20`,
+                      `Taux de réussite : ${ds.passRates[idx]}%`,
+                      `Évaluations reçues : ${ds.counts[idx]}`
+                    ];
+                  }
+                }
+              }
+            },
+            scales: {
+              y: {
+                min: 0,
+                max: 20,
+                ticks: { stepSize: 2, color: '#64748b' },
+                grid: { color: '#f1f5f9' }
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: '#334155', font: { weight: '600' } }
+              }
+            }
+          }
+        });
+
+      // -------------------------------------------------------------
+      // MODE 5 : DISTRIBUTION DES NOTES & PROFILS
+      // -------------------------------------------------------------
+      } else if (teacherChartMode === 'distribution') {
+        const dist = teacherChartRaw.grade_distribution || {};
+        const labels = Object.keys(dist);
+        const counts = labels.map(l => dist[l]);
+
+        const colors = [
+          'rgba(244, 63, 94, 0.85)',   // < 8
+          'rgba(251, 146, 60, 0.85)',  // 8 - 9.9
+          'rgba(250, 204, 21, 0.85)',  // 10 - 11.9
+          'rgba(52, 211, 153, 0.85)',  // 12 - 13.9
+          'rgba(16, 185, 129, 0.85)',  // 14 - 15.9
+          'rgba(5, 150, 105, 0.85)',   // 16 - 20
+        ];
+
+        teacherChartInstance = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Nombre d\'évaluations',
+              data: counts,
+              backgroundColor: colors,
+              borderRadius: 8,
+              borderWidth: 1.5,
+              borderColor: colors.map(c => c.replace('0.85', '1'))
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#0f172a',
+                padding: 10,
+                cornerRadius: 10,
+                callbacks: {
+                  label: (ctx) => `${ctx.parsed.y} note(s) dans cette tranche`
+                }
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { stepSize: 1, color: '#64748b' },
+                grid: { color: '#f1f5f9' }
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: '#334155', font: { weight: '600' } }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    function getLineChartOptions(title) {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'nearest',
+          intersect: false
+        },
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: {
+              boxWidth: 12,
+              usePointStyle: true,
+              font: { size: 11, weight: '600' },
+              color: '#334155'
+            }
+          },
+          tooltip: {
+            backgroundColor: '#0f172a',
+            padding: 10,
+            cornerRadius: 10,
+            titleFont: { size: 12, weight: 'bold' },
+            callbacks: {
+              title: (items) => {
+                if (!items.length) return '';
+                const d = new Date(items[0].parsed.x);
+                return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+              },
+              label: (ctx) => {
+                const raw = ctx.raw;
+                if (raw && raw.course) {
+                  const studentName = raw.studentName ? `${raw.studentName} : ` : '';
+                  return `${studentName}${raw.y} / 20 (${raw.course})`;
+                }
+                return `${ctx.dataset.label} : ${ctx.parsed.y} / 20`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            grid: { color: '#f1f5f9' },
+            ticks: {
+              callback: (val) => new Date(val).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+              maxTicksLimit: 8,
+              color: '#64748b',
+              font: { size: 11 }
+            }
+          },
+          y: {
+            min: 0,
+            max: 20,
+            ticks: { stepSize: 2, color: '#64748b', font: { size: 11 } },
+            grid: { color: '#f1f5f9' }
+          }
+        }
+      };
     }
 
     // ================= LOGIQUE PAGE ADMIN ÉCOLE =================

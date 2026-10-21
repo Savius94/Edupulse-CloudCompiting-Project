@@ -467,6 +467,14 @@ def get_student_dashboard(current: User = Depends(get_current_user), db: Session
     )
     alert = db.query(StudentAlert).filter(StudentAlert.student_id == current.id).first()
 
+    # Moyennes personnelles par matière
+    course_notes: Dict[str, List[float]] = {}
+    for r in records:
+        course_notes.setdefault(r.course_name, []).append(r.score_raw)
+    course_averages = {
+        c: round(sum(vals) / len(vals), 2) for c, vals in course_notes.items()
+    }
+
     return {
         "student": {
             "id": current.id,
@@ -481,13 +489,17 @@ def get_student_dashboard(current: User = Depends(get_current_user), db: Session
             "weakest_course": alert.weakest_course if alert else None,
             "recommendation": alert.recommendation if alert else "Saisissez vos premières notes pour obtenir un bilan personnalisé."
         },
+        "course_averages": course_averages,
         "statements": [
             {
                 "id": r.statement_uuid,
                 "course_name": r.course_name,
                 "score_raw": r.score_raw,
                 "score_max": r.score_max,
+                "verb": r.verb,
                 "timestamp": r.timestamp.strftime("%d/%m/%Y %H:%M"),
+                "date": r.timestamp.strftime("%d/%m/%Y"),
+                "iso_timestamp": r.timestamp.isoformat(),
                 "raw_xapi": r.statement_json
             }
             for r in records
@@ -555,6 +567,156 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
             }
             for rec, usr in recent_xapi
         ]
+    }
+
+
+@app.get("/api/teacher/chart-data")
+def get_teacher_chart_data(
+    class_name: Optional[str] = None,
+    course_name: Optional[str] = None,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current.role not in ("ENSEIGNANT", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
+
+    # 1. Classes & Matières existantes pour les filtres
+    all_classes_tuples = (
+        db.query(User.class_name)
+        .filter(User.role == "ETUDIANT", User.class_name.isnot(None))
+        .distinct()
+        .all()
+    )
+    available_classes = sorted([c[0] for c in all_classes_tuples if c[0]])
+
+    all_courses_tuples = (
+        db.query(XAPIStatementRecord.course_name)
+        .distinct()
+        .all()
+    )
+    available_courses = sorted([c[0] for c in all_courses_tuples if c[0]])
+
+    # 2. Requête des étudiants (filtrés optionnellement par classe)
+    stu_q = db.query(User).filter(User.role == "ETUDIANT")
+    if class_name and class_name != "ALL":
+        stu_q = stu_q.filter(User.class_name == class_name)
+    students = stu_q.order_by(User.full_name.asc()).all()
+    student_ids = [s.id for s in students]
+
+    alerts_map = {
+        a.student_id: a
+        for a in db.query(StudentAlert).filter(StudentAlert.student_id.in_(student_ids)).all()
+    } if student_ids else {}
+
+    students_summary = []
+    for s in students:
+        a = alerts_map.get(s.id)
+        students_summary.append({
+            "id": s.id,
+            "full_name": s.full_name,
+            "class_name": s.class_name or "Générale",
+            "average_score": a.average_score if a else None,
+            "recent_trend": a.recent_trend if a else 0.0,
+            "risk_level": a.risk_level if a else "SANS_DONNEES",
+            "weakest_course": a.weakest_course if a else "-",
+        })
+
+    if not student_ids:
+        return {
+            "classes": available_classes,
+            "courses": available_courses,
+            "students": [],
+            "statements": [],
+            "course_stats": {},
+            "grade_distribution": {},
+            "overall_stats": {
+                "total_notes": 0,
+                "overall_average": 0.0,
+                "pass_rate": 0.0,
+                "highest_score": 0.0,
+                "lowest_score": 0.0,
+                "risk_counts": {"CRITIQUE": 0, "VIGILANCE": 0, "STABLE": 0},
+            }
+        }
+
+    # 3. Requête des statements xAPI triés par date chronologique
+    stmt_q = (
+        db.query(XAPIStatementRecord, User)
+        .join(User, User.id == XAPIStatementRecord.student_id)
+        .filter(XAPIStatementRecord.student_id.in_(student_ids))
+    )
+    if course_name and course_name != "ALL":
+        stmt_q = stmt_q.filter(XAPIStatementRecord.course_name == course_name)
+
+    records = stmt_q.order_by(XAPIStatementRecord.timestamp.asc()).all()
+
+    formatted_statements = []
+    course_scores: Dict[str, List[float]] = {}
+    all_scores: List[float] = []
+
+    for rec, usr in records:
+        all_scores.append(rec.score_raw)
+        course_scores.setdefault(rec.course_name, []).append(rec.score_raw)
+        formatted_statements.append({
+            "id": rec.statement_uuid,
+            "student_id": usr.id,
+            "student_name": usr.full_name,
+            "class_name": usr.class_name or "Générale",
+            "course_name": rec.course_name,
+            "score_raw": rec.score_raw,
+            "score_max": rec.score_max,
+            "verb": rec.verb,
+            "timestamp": rec.timestamp.strftime("%d/%m/%Y"),
+            "iso_timestamp": rec.timestamp.isoformat(),
+        })
+
+    # Statistiques par matière
+    course_stats = {}
+    for c_name, scores in course_scores.items():
+        c_avg = round(sum(scores) / len(scores), 2)
+        c_pass = round((sum(1 for sc in scores if sc >= 10.0) / len(scores)) * 100, 1)
+        course_stats[c_name] = {
+            "average": c_avg,
+            "count": len(scores),
+            "pass_rate": c_pass,
+            "min": min(scores),
+            "max": max(scores),
+        }
+
+    # Distribution des tranches de notes
+    dist = {
+        "< 8": sum(1 for s in all_scores if s < 8.0),
+        "8 - 9.9": sum(1 for s in all_scores if 8.0 <= s < 10.0),
+        "10 - 11.9": sum(1 for s in all_scores if 10.0 <= s < 12.0),
+        "12 - 13.9": sum(1 for s in all_scores if 12.0 <= s < 14.0),
+        "14 - 15.9": sum(1 for s in all_scores if 14.0 <= s < 16.0),
+        "16 - 20": sum(1 for s in all_scores if s >= 16.0),
+    }
+
+    # Comptages de risques
+    risk_counts = {
+        "CRITIQUE": sum(1 for s in students_summary if s["risk_level"] == "CRITIQUE"),
+        "VIGILANCE": sum(1 for s in students_summary if s["risk_level"] == "VIGILANCE"),
+        "STABLE": sum(1 for s in students_summary if s["risk_level"] == "STABLE"),
+    }
+
+    overall_stats = {
+        "total_notes": len(all_scores),
+        "overall_average": round(sum(all_scores) / len(all_scores), 2) if all_scores else 0.0,
+        "pass_rate": round((sum(1 for sc in all_scores if sc >= 10.0) / len(all_scores)) * 100, 1) if all_scores else 0.0,
+        "highest_score": max(all_scores) if all_scores else 0.0,
+        "lowest_score": min(all_scores) if all_scores else 0.0,
+        "risk_counts": risk_counts,
+    }
+
+    return {
+        "classes": available_classes,
+        "courses": available_courses,
+        "students": students_summary,
+        "statements": formatted_statements,
+        "course_stats": course_stats,
+        "grade_distribution": dist,
+        "overall_stats": overall_stats,
     }
 
 
