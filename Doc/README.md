@@ -49,13 +49,22 @@ cloud-learning-saas/
 
 ---
 
-## 3. Routage Réseau et Ports d'Accès
+## 3. Routage Réseau, DNS & Ports d'Accès
 
-Le projet centralise le trafic HTTP public sur le port `8000`[cite: 7]. Chaque stack d'établissement dispose d'un double mode d'accès (via sous-domaine Traefik ou via port direct)[cite: 3, 7, 8] :
+Le projet centralise le trafic HTTP public sur le port `8000` (ou le port standard `80` configurable via `PUBLIC_PORT` dans `.env`). Chaque stack d'établissement dispose d'un routage sous-domaine automatique via Traefik ainsi que d'un accès par port direct :
 
-* **Portail Public & Super-Admin :** `http://cloudproject.mnbll.fr:8000` ou `http://localhost:8000` (et `http://localhost:8001` en accès direct)[cite: 7, 8].
-* **Stack Établissement #1 :** `http://<slug>.cloudproject.mnbll.fr:8000` ou `http://<slug>.localhost:8000` via Traefik, ou `http://localhost:8101` en port direct (`8100 + id`)[cite: 3, 7, 8].
-* **Isolation réseau des bases de données :** Les conteneurs PostgreSQL (`${TENANT_SLUG}-db`) sont uniquement rattachés à leur réseau interne (`tenant-internal-net`) sans port exposé sur l'hôte, tandis que les conteneurs applicatifs (`${TENANT_SLUG}-app`) sont connectés à la fois à `saas-public-net` (pour Traefik) et à `tenant-internal-net`[cite: 3].
+* **Configuration DNS Officielle :**
+  * **Domaine principal (`edupulse.mnbll.fr`)** : Pointe vers l'IP publique du serveur/VPS. Traefik route automatiquement vers le portail d'accueil public et le panneau Super-Admin (`saas-portal-api`).
+  * **Wildcard (`*.edupulse.mnbll.fr`)** : Pointe vers la même IP publique du serveur/VPS. Traefik route dynamiquement tout sous-domaine `http://<slug>.edupulse.mnbll.fr:8000` vers le conteneur applicatif du stack correspondant (`<slug>-app`).
+* **Résolution Dynamique des Redirections & Liens :**
+  * Toutes les redirections et liens (bouton « Ouvrir l'espace » après création d'un établissement, liens dans les tableaux de bord client et super-admin, liens de retour vers le portail depuis un établissement) s'adaptent dynamiquement au contexte du navigateur :
+    * Sur le domaine de production -> URL de sous-domaine `http://<slug>.edupulse.mnbll.fr:8000`.
+    * En développement local (`localhost`) -> URL de sous-domaine local `http://<slug>.localhost:8000` (ou port direct `:810X` si accédé sur `:8001`).
+    * Par IP directe -> URL sur port dédié `http://<IP>:${8100 + id}`.
+* **URLs d'accès direct :**
+  * **Portail Public & Super-Admin :** `http://edupulse.mnbll.fr:8000` ou `http://localhost:8000` (et `http://localhost:8001` en accès conteneur direct).
+  * **Stack Établissement #1 :** `http://<slug>.edupulse.mnbll.fr:8000` ou `http://<slug>.localhost:8000` via Traefik, ou `http://localhost:8101` en port direct (`8100 + id`).
+* **Isolation réseau des bases de données :** Les conteneurs PostgreSQL (`${TENANT_SLUG}-db`) sont uniquement rattachés à leur réseau interne (`tenant-internal-net`) sans port exposé sur l'hôte, tandis que les conteneurs applicatifs (`${TENANT_SLUG}-app`) sont connectés à la fois à `saas-public-net` (pour Traefik) et à `tenant-internal-net`.
 
 ---
 
@@ -85,7 +94,7 @@ Le projet centralise le trafic HTTP public sur le port `8000`[cite: 7]. Chaque s
 Le portail d'accueil et chaque stack d'établissement intègrent un bouton de paramètres (`⚙️`) en haut à droite permettant de basculer instantanément entre les rôles[cite: 4, 8].
 
 ### Niveau 1 — Portail d'Accueil (`portal/`)
-* **Super-Admin Global (`SUPER_ADMIN`)** : Email `superadmin@cloudproject.mnbll.fr` / Mot de passe `SuperSecretPassword123!` (auto-initialisé au démarrage de `portal-api`)[cite: 7, 8].
+* **Super-Admin Global (`SUPER_ADMIN`)** : Email `superadmin@edupulse.mnbll.fr` / Mot de passe `SuperSecretPassword123!` (auto-initialisé au démarrage de `portal-api`)[cite: 7, 8].
 * **Client Démo (`SUBSCRIPTION_ADMIN`)** : Email `direction@lycee-moulin.fr` / Mot de passe `ClientPass123!` (créé ou connecté automatiquement via le menu `⚙️`)[cite: 8].
 
 ### Niveau 2 — À l'intérieur de chaque Stack Établissement (`tenant-stack/`)
@@ -140,13 +149,13 @@ Si la base est neuve (`count <= 1`) et que `MAX_USERS >= 16`, l'établissement e
 ## 6. Consignes Techniques pour la Maintenance (IA & Développeurs)
 
 * **Réseau externe `saas-public-net`** : Ne jamais supprimer ce réseau externe dans `tenant-stack/docker-compose.tenant.yml`, car il permet à Traefik de router les requêtes vers chaque conteneur `${TENANT_SLUG}-app`[cite: 3].
-* **Syntaxe Traefik** : Conserver la règle `Host(\`${TENANT_SLUG}.${BASE_DOMAIN:-cloudproject.mnbll.fr}\`) \vert{}\vert{} Host(\`${TENANT_SLUG}.localhost\`)` sur l'entrypoint `web` et le port interne `8000`[cite: 3].
+* **Syntaxe Traefik** : Conserver la règle `Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.edupulse.mnbll.fr`) || Host(`${TENANT_SLUG}.localhost`)` sur l'entrypoint `web` et le port interne `8000`[cite: 3].
 * **Routes API du Portail (`portal/main.py`)** :
   * Authentification : `POST /api/auth/register`, `POST /api/auth/login`[cite: 7, 8].
   * Espace Client : `GET /api/tenants/me` (et `/api/tenants/my`), `POST /api/tenants`[cite: 7, 8].
   * Super-Admin : `GET /api/superadmin/vm-stats`, `GET /api/superadmin/tenants`, `POST /api/superadmin/tenants`, `POST /api/superadmin/tenants/{slug}/{action}`, `DELETE /api/superadmin/tenants/{slug}`, `GET /api/superadmin/users`, `DELETE /api/superadmin/users/{user_id}`[cite: 7, 8].
 * **Routes API d'un Stack Établissement (`tenant-stack/main.py`)** :
   * Informations & Auth : `GET /api/info`, `POST /api/auth/login`, `POST /api/auth/demo-switch/{target_role}`[cite: 1, 4].
-  * Admin École : `GET /api/admin/users`, `POST /api/admin/users`, `DELETE /api/admin/users/{user_id}`[cite: 1, 4].
-  * Étudiant & LRS xAPI : `POST /xapi/statements`, `GET /api/student/me`[cite: 1, 4].
-  * Enseignant : `GET /api/teacher/analytics`[cite: 1, 4].
+  * Admin École : `GET /api/admin/users`, `POST /api/admin/users`, `DELETE /api/admin/users/{user_id}`, `POST /api/admin/users/import-csv` (import groupé de comptes avec contrôle strict du quota MAX_USERS), `GET /api/admin/users/csv-template` (modèle CSV téléchargeable)[cite: 1, 4].
+  * Étudiant & LRS xAPI : `POST /xapi/statements`, `GET /api/student/me` (avec moyennes par matière et timestamps pour le graphique temporel)[cite: 1, 4].
+  * Enseignant : `GET /api/teacher/analytics`, `GET /api/teacher/chart-data` (séries temporelles pour comparateur d'élèves, tendance de la promotion, moyennes par matière et distribution des notes)[cite: 1, 4].

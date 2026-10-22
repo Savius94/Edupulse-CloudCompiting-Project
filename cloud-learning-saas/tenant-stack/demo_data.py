@@ -340,7 +340,7 @@ def seed_demo_dataset(
                     "display": {"fr-FR": verb_display},
                 },
                 "object": {
-                    "id": f"http://{tenant_slug}.cloudproject.mnbll.fr/courses/{course_slug}",
+                    "id": f"http://{tenant_slug}.edupulse.mnbll.fr/courses/{course_slug}",
                     "definition": {
                         "name": {"fr-FR": course},
                         "type": "http://adlnet.gov/expapi/activities/assessment",

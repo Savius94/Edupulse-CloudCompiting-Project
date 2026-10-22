@@ -9,10 +9,10 @@ Ce projet consiste à concevoir et déployer une plateforme **SaaS (Software as 
 
 L'architecture est structurée en **deux niveaux d'isolation (2-Tier Multi-Tenancy)** optimisés pour fonctionner sur une machine virtuelle (VM) aux ressources limitées :
 
-1. **Niveau 1 — Le Control Plane (Portail Public : `cloudproject.mnbll.fr`)** :
-   * **Espace Administrateur d'Abonnement (Client)** : Permet à un représentant d'école de créer un compte, puis de provisionner un ou plusieurs établissements en choisissant un nom d'établissement, un sous-domaine DNS (`school1.cloudproject.mnbll.fr`) et un plan de capacité (`200`, `500` ou `1000` utilisateurs maximum).
+1. **Niveau 1 — Le Control Plane (Portail Public : `edupulse.mnbll.fr`)** :
+   * **Espace Administrateur d'Abonnement (Client)** : Permet à un représentant d'école de créer un compte, puis de provisionner un ou plusieurs établissements en choisissant un nom d'établissement, un sous-domaine DNS (`school1.edupulse.mnbll.fr`) et un plan de capacité (`200`, `500` ou `1000` utilisateurs maximum).
    * **Espace Super-Administrateur Global (Cloud Operator)** : Permet de surveiller en temps réel les ressources de la VM (CPU, RAM, Disque), de superviser tous les stacks Docker déployés, de modifier les quotas, et d'ajouter, suspendre ou supprimer des stacks et des comptes clients.
-2. **Niveau 2 — Le Data/App Plane (Stack Établissement Isolé : `<slug>.cloudproject.mnbll.fr`)** :
+2. **Niveau 2 — Le Data/App Plane (Stack Établissement Isolé : `<slug>.edupulse.mnbll.fr`)** :
    * Chaque établissement dispose de sa propre pile applicative Docker isolée (1 conteneur API/Frontend + 1 conteneur PostgreSQL dédié).
    * Le compte ayant créé l'établissement sur le portail devient automatiquement le **compte Administrateur principal** de ce stack.
    * Le stack expose trois vues métier : **Vue Administrateur d'école** (gestion des comptes et des rôles sous contrôle du quota), **Vue Étudiant** (saisie de notes générant des statements xAPI) et **Vue Enseignant** (tableau de bord analytique, scores de risque et recommandations pédagogiques).
@@ -25,7 +25,7 @@ Les technologies ont été sélectionnées pour minimiser l'empreinte mémoire (
 
 | Couche | Technologie / Image Docker | Rôle et Justification |
 | :--- | :--- | :--- |
-| **DNS & Réseau** | Enregistrements DNS `A` + Wildcard | `cloudproject.mnbll.fr` et `*.cloudproject.mnbll.fr` pointent vers l'IP publique de la VM. |
+| **DNS & Réseau** | Enregistrements DNS `A` + Wildcard | `edupulse.mnbll.fr` et `*.edupulse.mnbll.fr` pointent vers l'IP publique de la VM. |
 | **Reverse Proxy** | **Traefik v3.0** (`traefik:v3.0`) | Découverte automatique des nouveaux stacks via le socket Docker et routage par sous-domaine (`Host()`). |
 | **Backend Portail** | **Python 3.11 + FastAPI** (`python:3.11-slim`) | API REST du portail, monitoring système (`psutil`) et orchestration Docker (`docker compose` / SDK). |
 | **BDD Portail** | **PostgreSQL 16 Alpine** (`postgres:16-alpine`) | Stocke les comptes du portail (`SUPER_ADMIN`, `SUBSCRIPTION_ADMIN`) et le registre des stacks déployés. |
@@ -44,14 +44,14 @@ cloud-learning-saas/
 ├── .env                               # Variables globales (Domaine, identifiants Super-Admin)
 ├── ARCHITECTURE_ET_PLAN_PROJET.md     # Documentation technique du projet
 │
-├── portal/                            # NIVEAU 1 : CONTROL PLANE (cloudproject.mnbll.fr)
+├── portal/                            # NIVEAU 1 : CONTROL PLANE (edupulse.mnbll.fr)
 │   ├── Dockerfile                     # Image Python + Docker CLI pour orchestrer les stacks
 │   ├── requirements.txt               # fastapi, uvicorn, sqlalchemy, psycopg2-binary, psutil...
 │   ├── main.py                        # API FastAPI : Auth, Super-Admin, VM Stats & Provisioning
 │   └── static/
 │       └── index.html                 # Interface Web du Portail (Accueil, Espace Client, Super-Admin)
 │
-└── tenant-stack/                      # NIVEAU 2 : TEMPLATE DE STACK ÉTABLISSEMENT (<slug>.cloudproject.mnbll.fr)
+└── tenant-stack/                      # NIVEAU 2 : TEMPLATE DE STACK ÉTABLISSEMENT (<slug>.edupulse.mnbll.fr)
     ├── docker-compose.tenant.yml      # Modèle instancié par école (school1-app + school1-db)
     ├── Dockerfile                     # Image Python de l'application établissement
     ├── requirements.txt               # Dépendances de l'application école
@@ -78,7 +78,7 @@ cloud-learning-saas/
    * `id` (PK, Integer)
    * `institution_name` (String — ex: *"Lycée Jean Moulin"*)
    * `slug` (String, Unique — ex: `school1`)
-   * `domain` (String — ex: `school1.cloudproject.mnbll.fr`)
+   * `domain` (String — ex: `school1.edupulse.mnbll.fr`)
    * `plan_max_users` (Integer : `200`, `500` ou `1000`)
    * `status` (String : `'RUNNING'`, `'STOPPED'`, `'ERROR'`)
    * `owner_id` (FK $\rightarrow$ `portal_users.id`)

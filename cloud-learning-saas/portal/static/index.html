@@ -346,7 +346,7 @@
               <div class="flex items-center rounded-xl border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
                 <input id="tenant-slug" type="text" required pattern="[a-z0-9-]+" placeholder="school1"
                   class="w-full px-3 py-2.5 text-sm focus:outline-none" />
-                <span class="bg-slate-100 px-3 py-2.5 text-xs text-slate-500 font-mono border-l border-slate-300">.cloudproject.mnbll.fr</span>
+                <span class="bg-slate-100 px-3 py-2.5 text-xs text-slate-500 font-mono border-l border-slate-300">.edupulse.mnbll.fr</span>
               </div>
               <p class="text-[11px] text-slate-400 mt-1">Lettres minuscules et chiffres uniquement (ex: school1, school2).</p>
             </div>
@@ -685,7 +685,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              email: 'superadmin@cloudproject.mnbll.fr',
+              email: 'superadmin@edupulse.mnbll.fr',
               password: 'SuperSecretPassword123!'
             })
           });
@@ -697,7 +697,7 @@
           }
         } catch (err) {}
         // Mode démo local si API hors-ligne
-        saveSession('demo-sa-token', { email: 'superadmin@cloudproject.mnbll.fr', full_name: 'Super Administrateur', role: 'SUPER_ADMIN' });
+        saveSession('demo-sa-token', { email: 'superadmin@edupulse.mnbll.fr', full_name: 'Super Administrateur', role: 'SUPER_ADMIN' });
         switchView('superadmin');
       }
 
@@ -860,6 +860,42 @@
       }
     }
 
+    function getTenantTargetUrl(t, type = 'primary') {
+      if (!t) return '#';
+      const proto = window.location.protocol;
+      const host = window.location.hostname;
+      const port = window.location.port ? `:${window.location.port}` : '';
+      const directPort = 8100 + (t.id || 1);
+      const slug = t.slug;
+
+      const directUrl = `${proto}//${host === 'localhost' || host === '127.0.0.1' ? 'localhost' : host}:${directPort}`;
+      const domainUrl = `${proto}//${slug}.edupulse.mnbll.fr${port}`;
+      const localSubdomainUrl = `${proto}//${slug}.localhost${port || ':8000'}`;
+
+      if (type === 'direct') return directUrl;
+      if (type === 'domain') return domainUrl;
+      if (type === 'local') return localSubdomainUrl;
+
+      // Résolution intelligente selon le contexte de navigation :
+      // 1. Accès via le nom de domaine de production edupulse.mnbll.fr ou sous-domaine
+      if (host.includes('edupulse.mnbll.fr') || host.endsWith('.mnbll.fr')) {
+        return domainUrl;
+      }
+
+      // 2. Accès en développement local via Traefik (port 8000)
+      if ((host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost')) && window.location.port === '8000') {
+        return localSubdomainUrl;
+      }
+
+      // 3. Accès en développement local via port direct (8001) ou direct IP
+      if (host === 'localhost' || host === '127.0.0.1' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+        return directUrl;
+      }
+
+      // 4. Par défaut : nom de domaine officiel
+      return domainUrl;
+    }
+
     function renderClientTenants(tenants) {
       const container = document.getElementById('client-tenants-list');
       if (!tenants || tenants.length === 0) {
@@ -880,9 +916,9 @@
 
       container.innerHTML = tenants.map(t => {
         const isActive = t.status === 'RUNNING';
-        const directUrl = t.direct_local_url || `http://localhost:${8100 + (t.id || 1)}`;
-        const subdomainUrl = t.local_subdomain_url || `http://${t.slug}.localhost:8000`;
-        const primaryUrl = window.location.port === '8000' ? subdomainUrl : directUrl;
+        const primaryUrl = getTenantTargetUrl(t, 'primary');
+        const directUrl = getTenantTargetUrl(t, 'direct');
+        const displayDomain = `${t.slug}.edupulse.mnbll.fr`;
 
         return `
           <div class="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-md transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -898,7 +934,7 @@
                 Offre souscrite : <strong>${planNames[t.plan_max_users] || (t.plan_max_users + ' utilisateurs max')}</strong>
               </p>
               <p class="text-xs text-slate-500">
-                Adresse web dédiée : <span class="font-semibold text-indigo-600">${t.slug}.cloudproject.mnbll.fr</span>
+                Adresse web dédiée : <a href="${primaryUrl}" target="_blank" class="font-semibold text-indigo-600 hover:underline">${displayDomain}</a>
               </p>
             </div>
 
@@ -909,9 +945,9 @@
                 <span>→</span>
               </a>
               <div class="flex items-center gap-3 text-[11px] text-slate-400">
-                <a href="${directUrl}" target="_blank" class="hover:text-indigo-600 underline">Accès direct (${directUrl.replace('http://', '')})</a>
+                <a href="${primaryUrl}" target="_blank" class="hover:text-indigo-600 underline font-mono">${primaryUrl.replace(/^https?:\/\//, '')}</a>
                 <span>•</span>
-                <a href="${subdomainUrl}" target="_blank" class="hover:text-indigo-600 underline">${t.slug}.localhost:8000</a>
+                <a href="${directUrl}" target="_blank" class="hover:text-indigo-600 underline">Port direct :${8100 + (t.id || 1)}</a>
               </div>
             </div>
           </div>
@@ -950,18 +986,18 @@
           return;
         }
 
-        const openLink = window.location.port === '8000'
-          ? (data.local_subdomain_url || `http://${data.slug}.localhost:8000`)
-          : (data.direct_local_url || `http://localhost:${8100 + (data.id || 1)}`);
+        const openLink = getTenantTargetUrl(data, 'primary');
 
         msgEl.className = 'text-xs p-4 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 space-y-2';
         msgEl.innerHTML = `
           <p class="font-bold text-sm">✅ Votre établissement « ${data.institution_name} » est maintenant en service !</p>
-          <p>Il est affiché dans votre liste à droite et accessible immédiatement :</p>
-          <div class="pt-1">
-            <a href="${openLink}" target="_blank" class="inline-block px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs">
-              Ouvrir l'espace ${data.institution_name} maintenant →
+          <p>Votre espace dédié est opérationnel et accessible immédiatement :</p>
+          <div class="pt-2 flex flex-wrap items-center gap-3">
+            <a href="${openLink}" target="_blank" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs shadow-sm transition">
+              <span>Ouvrir l'espace ${data.institution_name}</span>
+              <span>→</span>
             </a>
+            <span class="text-xs font-mono text-emerald-900 bg-emerald-100/70 px-2.5 py-1 rounded-lg">${openLink}</span>
           </div>
         `;
         e.target.reset();
@@ -998,10 +1034,17 @@
           const tenants = await tenantsRes.json();
           document.getElementById('metric-stacks').textContent = `${tenants.length} actif(s)`;
           const tbody = document.getElementById('sa-tenants-tbody');
-          tbody.innerHTML = tenants.map(t => `
+          tbody.innerHTML = tenants.map(t => {
+            const tenantUrl = getTenantTargetUrl(t, 'primary');
+            return `
             <tr>
               <td class="py-3 px-2 font-semibold text-slate-900">${t.institution_name}</td>
-              <td class="py-3 px-2 font-mono text-xs text-indigo-600">${t.slug}.cloudproject.mnbll.fr</td>
+              <td class="py-3 px-2 font-mono text-xs">
+                <a href="${tenantUrl}" target="_blank" class="text-indigo-600 hover:underline flex items-center gap-1 font-semibold">
+                  <span>${t.slug}.edupulse.mnbll.fr</span>
+                  <span class="text-[10px]">↗</span>
+                </a>
+              </td>
               <td class="py-3 px-2 text-xs text-slate-600">${t.owner_email || '-'}</td>
               <td class="py-3 px-2 text-xs font-semibold">${t.plan_max_users} users</td>
               <td class="py-3 px-2">
@@ -1018,7 +1061,8 @@
                 </button>
               </td>
             </tr>
-          `).join('') || `<tr><td colspan="6" class="py-6 text-center text-xs text-slate-400">Aucun stack déployé</td></tr>`;
+          `;
+          }).join('') || `<tr><td colspan="6" class="py-6 text-center text-xs text-slate-400">Aucun stack déployé</td></tr>`;
         }
 
         if (usersRes.ok) {

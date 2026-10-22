@@ -26,9 +26,9 @@ DATABASE_URL = os.getenv(
 )
 JWT_SECRET = os.getenv("JWT_SECRET", "super_secret_cloud_jwt_key_2026")
 JWT_ALGORITHM = "HS256"
-BASE_DOMAIN = os.getenv("BASE_DOMAIN", "cloudproject.mnbll.fr")
+BASE_DOMAIN = os.getenv("BASE_DOMAIN", "edupulse.mnbll.fr")
 PUBLIC_PORT = os.getenv("PUBLIC_PORT", "8000")
-SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "superadmin@cloudproject.mnbll.fr")
+SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "superadmin@edupulse.mnbll.fr")
 SUPERADMIN_PASSWORD = os.getenv("SUPERADMIN_PASSWORD", "SuperSecretPassword123!")
 SUPERADMIN_NAME = os.getenv("SUPERADMIN_NAME", "Super-Admin Global")
 TENANT_COMPOSE_PATH = os.getenv(
@@ -161,6 +161,7 @@ class CreateTenantRequest(BaseModel):
 def serialize_tenant(t: TenantStack, owner_email: Optional[str] = None) -> dict:
     direct_port = 8100 + t.id
     resolved_email = owner_email or (t.owner.email if t.owner else "")
+    port_str = f":{PUBLIC_PORT}" if PUBLIC_PORT not in ("80", "443", "") else ""
     return {
         "id": t.id,
         "slug": t.slug,
@@ -172,8 +173,8 @@ def serialize_tenant(t: TenantStack, owner_email: Optional[str] = None) -> dict:
         "owner_id": t.owner_id,
         "owner_email": resolved_email,
         "direct_port": direct_port,
-        "domain_url": f"http://{t.slug}.{BASE_DOMAIN}:{PUBLIC_PORT}",
-        "local_subdomain_url": f"http://{t.slug}.localhost:{PUBLIC_PORT}",
+        "domain_url": f"http://{t.slug}.{BASE_DOMAIN}{port_str}",
+        "local_subdomain_url": f"http://{t.slug}.localhost{port_str}",
         "direct_local_url": f"http://localhost:{direct_port}",
         "created_at": t.created_at.strftime("%d/%m/%Y à %H:%M") if t.created_at else "Aujourd'hui",
     }

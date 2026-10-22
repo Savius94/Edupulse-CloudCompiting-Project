@@ -1,0 +1,16 @@
+full_name,email,role,class_name,password
+Jean Dupont,jean.dupont@ecole.fr,ETUDIANT,M1 Cloud & DevOps,Ecole123!
+Sophie Martin,sophie.martin@ecole.fr,ENSEIGNANT,Département Informatique,Prof123!
+Claire Moreau,claire.moreau@ecole.fr,ETUDIANT,L3 Informatique,Ecole123!
+Lucas Bernard,lucas.bernard@ecole.fr,ETUDIANT,M1 Cloud & DevOps,Ecole123!
+Marc Lefevre,marc.lefevre@ecole.fr,ADMIN,Direction / Scolarité,AdminPass123!
+Leo Dubois,leo.dubois@ecole.fr,ETUDIANT,M1 Informatique,Password123
+Chloe Thomas,chloe.thomas@ecole.fr,ETUDIANT,L3 Informatique,Password123
+Maxime Richard,maxime.richard@ecole.fr,ETUDIANT,M1 Informatique,Password123
+Camille Laurent,camille.laurent@ecole.fr,ETUDIANT,L3 Informatique,Password123
+Antoine Garcia,antoine.garcia@ecole.fr,ETUDIANT,M2 Reseaux,Password123
+Julien Roux,julien.roux@ecole.fr,ETUDIANT,M1 Informatique,Password123
+Emma Petit,emma.petit@ecole.fr,ETUDIANT,L3 Informatique,Password123
+Lucas Blanc,lucas.blanc@ecole.fr,ETUDIANT,M2 Reseaux,Password123
+Alice Girard,alice.girard@ecole.fr,ETUDIANT,M1 Informatique,Password123
+Hugo Simon,hugo.simon@ecole.fr,ETUDIANT,L3 Informatique,Password123
