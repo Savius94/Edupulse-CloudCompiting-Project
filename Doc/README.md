@@ -51,19 +51,21 @@ cloud-learning-saas/
 
 ## 3. Routage Réseau, DNS & Ports d'Accès
 
-Le projet centralise le trafic HTTP public sur le port `8000` (ou le port standard `80` configurable via `PUBLIC_PORT` dans `.env`). Chaque stack d'établissement dispose d'un routage sous-domaine automatique via Traefik ainsi que d'un accès par port direct :
+Le projet centralise le trafic HTTP public via **Traefik** qui écoute directement sur le **port HTTP standard `80`** (`80:8000`) ainsi que sur le port `8000` (`8000:8000`) pour la rétrocompatibilité locale. Chaque stack d'établissement est ainsi accessible **directement par son sous-domaine sans numéro de port dans l'URL**, tout en conservant un port direct de secours (`8100 + id`) :
 
-* **Configuration DNS Officielle :**
-  * **Domaine principal (`edupulse.mnbll.fr`)** : Pointe vers l'IP publique du serveur/VPS. Traefik route automatiquement vers le portail d'accueil public et le panneau Super-Admin (`saas-portal-api`).
-  * **Wildcard (`*.edupulse.mnbll.fr`)** : Pointe vers la même IP publique du serveur/VPS. Traefik route dynamiquement tout sous-domaine `http://<slug>.edupulse.mnbll.fr:8000` vers le conteneur applicatif du stack correspondant (`<slug>-app`).
+* **Configuration DNS Officielle (Sans port dans l'URL) :**
+  * **Domaine principal (`http://edupulse.mnbll.fr`)** : Pointe vers l'IP publique du serveur/VPS (port 80). Traefik route automatiquement vers le portail d'accueil public et le panneau Super-Admin (`saas-portal-api:8000` sur le réseau interne `saas-public-net`).
+  * **Wildcard (`http://<slug>.edupulse.mnbll.fr`)** : Pointe vers la même IP publique du serveur/VPS (port 80). Même si les conteneurs d'écoles écoutent sur des ports hôtes distincts (`8101`, `8102`, etc.), Traefik intercepte le sous-domaine `<slug>.edupulse.mnbll.fr` sur le port 80 et redirige le trafic en interne sur le réseau Docker `saas-public-net` vers le conteneur `<slug>-app:8000`, **sans jamais afficher ni utiliser le port dans l'URL**.
+* **Protection contre l'interception Proxy sur Traefik :**
+  * Sur le VPS universitaire (UPPA), le conteneur `saas-traefik` force explicitement `HTTP_PROXY=""`, `HTTPS_PROXY=""` et `NO_PROXY="*"` afin que la configuration `~/.docker/config.json` n'envoie jamais le trafic interne des conteneurs Docker vers le proxy `cache.univ-pau.fr:3128`.
 * **Résolution Dynamique des Redirections & Liens :**
-  * Toutes les redirections et liens (bouton « Ouvrir l'espace » après création d'un établissement, liens dans les tableaux de bord client et super-admin, liens de retour vers le portail depuis un établissement) s'adaptent dynamiquement au contexte du navigateur :
-    * Sur le domaine de production -> URL de sous-domaine `http://<slug>.edupulse.mnbll.fr:8000`.
-    * En développement local (`localhost`) -> URL de sous-domaine local `http://<slug>.localhost:8000` (ou port direct `:810X` si accédé sur `:8001`).
+  * Toutes les redirections et liens (bouton « Ouvrir l'espace » après création d'un établissement, liens dans les tableaux de bord client et super-admin, liens de retour vers le portail depuis un établissement) s'adaptent dynamiquement :
+    * Sur le domaine de production (`edupulse.mnbll.fr`) -> URL pure par sous-domaine `http://<slug>.edupulse.mnbll.fr` (sans aucun port, même si le portail a été ouvert via `:8001`), avec un lien secondaire de secours vers le port direct (`:8101`, `:8102`...).
+    * En développement local (`localhost`) -> URL de sous-domaine local `http://<slug>.localhost` (ou `:8000`, ou port direct `:810X` si accédé sur `:8001`).
     * Par IP directe -> URL sur port dédié `http://<IP>:${8100 + id}`.
-* **URLs d'accès direct :**
-  * **Portail Public & Super-Admin :** `http://edupulse.mnbll.fr:8000` ou `http://localhost:8000` (et `http://localhost:8001` en accès conteneur direct).
-  * **Stack Établissement #1 :** `http://<slug>.edupulse.mnbll.fr:8000` ou `http://<slug>.localhost:8000` via Traefik, ou `http://localhost:8101` en port direct (`8100 + id`).
+* **URLs d'accès récapitulatives :**
+  * **Portail Public & Super-Admin :** `http://edupulse.mnbll.fr` (ou `http://localhost` / `http://localhost:8000`, et `:8001` en accès conteneur direct de secours).
+  * **Stack Établissement #1 :** `http://<slug>.edupulse.mnbll.fr` (ou `http://<slug>.localhost` via Traefik, et `:8101` en port direct de secours `8100 + id`).
 * **Isolation réseau des bases de données :** Les conteneurs PostgreSQL (`${TENANT_SLUG}-db`) sont uniquement rattachés à leur réseau interne (`tenant-internal-net`) sans port exposé sur l'hôte, tandis que les conteneurs applicatifs (`${TENANT_SLUG}-app`) sont connectés à la fois à `saas-public-net` (pour Traefik) et à `tenant-internal-net`.
 
 ---

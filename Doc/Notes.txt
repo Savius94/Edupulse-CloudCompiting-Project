@@ -69,7 +69,8 @@ A. Prérequis sur le VPS (si machine neuve Ubuntu/Debian) :
 
 4. Ouvrir les ports sur le pare-feu du VPS (UFW ou console cloud) :
    sudo ufw allow 22/tcp       # SSH
-   sudo ufw allow 8000/tcp     # Traefik (Entrée HTTP principale du SaaS)
+   sudo ufw allow 80/tcp       # HTTP standard Traefik (edupulse.mnbll.fr et *.edupulse.mnbll.fr SANS port)
+   sudo ufw allow 8000/tcp     # Traefik secondaire (rétrocompatibilité)
    sudo ufw allow 8001/tcp     # Portail direct de secours
    sudo ufw allow 8080/tcp     # Dashboard Traefik
    sudo ufw allow 8101:8150/tcp # Ports directs des stacks écoles (8100 + id)
@@ -84,10 +85,10 @@ Le réseau du VPS école passe obligatoirement par le proxy cache.univ-pau.fr:31
    Le fichier cloud-learning-saas/.env contient déjà la configuration requise :
    HTTP_PROXY=http://cache.univ-pau.fr:3128
    HTTPS_PROXY=http://cache.univ-pau.fr:3128
-   NO_PROXY=127.0.0.1,localhost,10.3.0.0/16,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,*.univ-pau.fr,portal-db,tenant-db,traefik
+   NO_PROXY=127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr,portal-db,tenant-db,traefik
    http_proxy=http://cache.univ-pau.fr:3128
    https_proxy=http://cache.univ-pau.fr:3128
-   no_proxy=127.0.0.1,localhost,10.3.0.0/16,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,*.univ-pau.fr,portal-db,tenant-db,traefik
+   no_proxy=127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr,portal-db,tenant-db,traefik
 
 2. Configuration du démon Docker pour 'docker pull' (si non encore fait sur la VM) :
    sudo mkdir -p /etc/systemd/system/docker.service.d
@@ -95,7 +96,7 @@ Le réseau du VPS école passe obligatoirement par le proxy cache.univ-pau.fr:31
    [Service]
    Environment="HTTP_PROXY=http://cache.univ-pau.fr:3128"
    Environment="HTTPS_PROXY=http://cache.univ-pau.fr:3128"
-   Environment="NO_PROXY=127.0.0.1,localhost,10.3.0.0/16,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,*.univ-pau.fr"
+   Environment="NO_PROXY=127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr"
    EOF
    sudo systemctl daemon-reload
    sudo systemctl restart docker
@@ -108,7 +109,7 @@ Le réseau du VPS école passe obligatoirement par le proxy cache.univ-pau.fr:31
       "default": {
         "httpProxy": "http://cache.univ-pau.fr:3128",
         "httpsProxy": "http://cache.univ-pau.fr:3128",
-        "noProxy": "127.0.0.1,localhost,10.3.0.0/16,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,*.univ-pau.fr"
+        "noProxy": "127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr"
       }
     }
    }

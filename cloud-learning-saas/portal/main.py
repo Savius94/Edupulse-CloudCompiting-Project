@@ -27,7 +27,7 @@ DATABASE_URL = os.getenv(
 JWT_SECRET = os.getenv("JWT_SECRET", "super_secret_cloud_jwt_key_2026")
 JWT_ALGORITHM = "HS256"
 BASE_DOMAIN = os.getenv("BASE_DOMAIN", "edupulse.mnbll.fr")
-PUBLIC_PORT = os.getenv("PUBLIC_PORT", "8000")
+PUBLIC_PORT = os.getenv("PUBLIC_PORT", "80")
 SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "superadmin@edupulse.mnbll.fr")
 SUPERADMIN_PASSWORD = os.getenv("SUPERADMIN_PASSWORD", "SuperSecretPassword123!")
 SUPERADMIN_NAME = os.getenv("SUPERADMIN_NAME", "Super-Admin Global")
@@ -173,7 +173,7 @@ def serialize_tenant(t: TenantStack, owner_email: Optional[str] = None) -> dict:
         "owner_id": t.owner_id,
         "owner_email": resolved_email,
         "direct_port": direct_port,
-        "domain_url": f"http://{t.slug}.{BASE_DOMAIN}{port_str}",
+        "domain_url": f"http://{t.slug}.{BASE_DOMAIN}",
         "local_subdomain_url": f"http://{t.slug}.localhost{port_str}",
         "direct_local_url": f"http://localhost:{direct_port}",
         "created_at": t.created_at.strftime("%d/%m/%Y à %H:%M") if t.created_at else "Aujourd'hui",
@@ -541,7 +541,17 @@ def sa_control_tenant(
         orchestrate_tenant_stack(action="stop", slug=slug, tenant_id=tenant.id)
         tenant.status = "STOPPED"
     elif action == "start":
-        orchestrate_tenant_stack(action="start", slug=slug, tenant_id=tenant.id)
+        owner = tenant.owner
+        orchestrate_tenant_stack(
+            action="up",
+            slug=slug,
+            tenant_id=tenant.id,
+            institution_name=tenant.institution_name,
+            plan_max_users=tenant.plan_max_users,
+            admin_email=owner.email if owner else "",
+            admin_password_hash=owner.password_hash if owner else "",
+            admin_name=owner.full_name if owner else "",
+        )
         tenant.status = "RUNNING"
     else:
         raise HTTPException(status_code=400, detail="Action invalide.")

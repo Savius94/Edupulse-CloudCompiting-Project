@@ -864,13 +864,15 @@
       if (!t) return '#';
       const proto = window.location.protocol;
       const host = window.location.hostname;
-      const port = window.location.port ? `:${window.location.port}` : '';
-      const directPort = 8100 + (t.id || 1);
+      const directPort = t.direct_port || (8100 + (t.id || 1));
       const slug = t.slug;
 
-      const directUrl = `${proto}//${host === 'localhost' || host === '127.0.0.1' ? 'localhost' : host}:${directPort}`;
-      const domainUrl = `${proto}//${slug}.edupulse.mnbll.fr${port}`;
-      const localSubdomainUrl = `${proto}//${slug}.localhost${port || ':8000'}`;
+      const directHost = (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost')) ? 'localhost' : host;
+      const directUrl = `${proto}//${directHost}:${directPort}`;
+      // Sur le domaine officiel, Traefik écoute sur le port 80 : l'URL sous-domaine ne comporte AUCUN port !
+      const domainUrl = `${proto}//${slug}.edupulse.mnbll.fr`;
+      const localPort = window.location.port === '8000' ? ':8000' : '';
+      const localSubdomainUrl = `${proto}//${slug}.localhost${localPort}`;
 
       if (type === 'direct') return directUrl;
       if (type === 'domain') return domainUrl;
@@ -882,8 +884,8 @@
         return domainUrl;
       }
 
-      // 2. Accès en développement local via Traefik (port 8000)
-      if ((host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost')) && window.location.port === '8000') {
+      // 2. Accès en développement local via Traefik (port 80 ou 8000)
+      if ((host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost')) && (window.location.port === '' || window.location.port === '80' || window.location.port === '8000')) {
         return localSubdomainUrl;
       }
 
@@ -892,7 +894,7 @@
         return directUrl;
       }
 
-      // 4. Par défaut : nom de domaine officiel
+      // 4. Par défaut : nom de domaine officiel sans port
       return domainUrl;
     }
 
@@ -987,6 +989,7 @@
         }
 
         const openLink = getTenantTargetUrl(data, 'primary');
+        const fallbackDirectLink = getTenantTargetUrl(data, 'direct');
 
         msgEl.className = 'text-xs p-4 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 space-y-2';
         msgEl.innerHTML = `
@@ -998,6 +1001,7 @@
               <span>→</span>
             </a>
             <span class="text-xs font-mono text-emerald-900 bg-emerald-100/70 px-2.5 py-1 rounded-lg">${openLink}</span>
+            <a href="${fallbackDirectLink}" target="_blank" class="text-[11px] text-emerald-700 hover:underline">Accès port direct (:${data.direct_port || (8100 + (data.id || 1))})</a>
           </div>
         `;
         e.target.reset();

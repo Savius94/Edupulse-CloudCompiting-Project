@@ -588,22 +588,21 @@
 
         const proto = window.location.protocol;
         const host = window.location.hostname;
-        const port = window.location.port ? `:${window.location.port}` : '';
         const currentHost = window.location.host;
 
         document.getElementById('header-inst-name').textContent = stackInfo.institution_name;
         document.getElementById('login-inst-title').textContent = stackInfo.institution_name;
         document.getElementById('header-domain').textContent = (currentHost.includes('localhost') || currentHost.includes('127.0.0.1'))
-          ? `${stackInfo.tenant_slug}.localhost:8000`
+          ? `${stackInfo.tenant_slug}.localhost`
           : `${stackInfo.tenant_slug}.edupulse.mnbll.fr`;
         document.getElementById('header-quota').textContent = `${stackInfo.current_users} / ${stackInfo.max_users} comptes`;
 
-        // Calcul dynamique de l'URL du portail principal
-        let portalUrl = `${proto}//edupulse.mnbll.fr${port}`;
+        // Calcul dynamique de l'URL du portail principal (sans port sur le domaine officiel)
+        let portalUrl = `${proto}//edupulse.mnbll.fr`;
         if (host.includes('localhost') || host === '127.0.0.1') {
-          portalUrl = `${proto}//localhost:${window.location.port || '8000'}`;
+          portalUrl = window.location.port === '8000' ? `${proto}//localhost:8000` : `${proto}//localhost`;
         } else if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
-          portalUrl = `${proto}//${host}:8000`;
+          portalUrl = `${proto}//${host}`;
         }
         const backPortalBtn = document.getElementById('btn-back-portal');
         if (backPortalBtn) backPortalBtn.href = portalUrl;

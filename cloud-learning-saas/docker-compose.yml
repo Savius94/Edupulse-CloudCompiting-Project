@@ -4,6 +4,12 @@ services:
     container_name: saas-traefik
     environment:
       DOCKER_API_VERSION: "1.45"
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: "*"
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -11,7 +17,8 @@ services:
       - "--providers.docker.network=saas-public-net"
       - "--entrypoints.web.address=:8000"
     ports:
-      - "${PUBLIC_PORT:-8000}:8000"
+      - "80:8000"
+      - "8000:8000"
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -55,7 +62,7 @@ services:
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@edupulse.mnbll.fr}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-SuperSecretPassword123!}
       BASE_DOMAIN: ${BASE_DOMAIN:-edupulse.mnbll.fr}
-      PUBLIC_PORT: ${PUBLIC_PORT:-8000}
+      PUBLIC_PORT: ${PUBLIC_PORT:-80}
       TENANT_COMPOSE_PATH: /app/tenant-stack/docker-compose.tenant.yml
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -74,7 +81,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saas-public-net"
-      - "traefik.http.routers.portal.rule=Host(`edupulse.mnbll.fr`) || Host(`${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
+      - "traefik.http.routers.portal.rule=Host(`edupulse.mnbll.fr`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
       - "traefik.http.routers.portal.entrypoints=web"
       - "traefik.http.services.portal.loadbalancer.server.port=8000"
     networks:
