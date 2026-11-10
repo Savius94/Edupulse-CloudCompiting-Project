@@ -209,7 +209,8 @@ def orchestrate_tenant_stack(
     )
     for proxy_var in [
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-        "http_proxy", "https_proxy", "no_proxy"
+        "http_proxy", "https_proxy", "no_proxy",
+        "GEMINI_API_KEY", "GEMINI_MODEL"
     ]:
         val = os.getenv(proxy_var)
         if val:

@@ -13,6 +13,7 @@ Todo:
 - Ajouter un boutton pour aceder a l'interface d'admin de stack pour les user sans devois se reconnecter a chaque fois (ou laisser comme ca)
 
 Fait:
+- Saisie des notes à 2 décimales (step="0.01" de .01 à .99) dans l'interface Étudiant et dans le backend xAPI
 - Configuration domaine officiel edupulse.mnbll.fr et wildcard *.edupulse.mnbll.fr avec routage dynamique Traefik
 - Résolution intelligente et dynamique de toutes les redirections et liens (création d'établissement, listes d'espaces, super-admin, retour vers portail) quel que soit le contexte (domaine, localhost ou IP)
 - Module analytique visuel complet (graphiques d'évolution, comparateur d'élèves, moyennes par matière, distribution)

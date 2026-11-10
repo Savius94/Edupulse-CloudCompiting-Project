@@ -41,6 +41,8 @@ services:
       ADMIN_PASSWORD_HASH: "${ADMIN_PASSWORD_HASH}"
       ADMIN_FULL_NAME: "${ADMIN_FULL_NAME:-Administrateur Principal}"
       JWT_SECRET: "${JWT_SECRET:-super-secret-tenant-key}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash}"
       HTTP_PROXY: "${HTTP_PROXY:-}"
       HTTPS_PROXY: "${HTTPS_PROXY:-}"
       NO_PROXY: "${NO_PROXY:-}"

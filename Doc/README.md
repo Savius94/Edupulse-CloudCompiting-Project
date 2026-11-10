@@ -79,15 +79,18 @@ Le projet centralise le trafic HTTP public via **Traefik** qui écoute directeme
 ### B. Base SQL d'un Établissement (`${TENANT_SLUG}-db` — `tenant-stack/main.py`)
 * **`users`** : Utilisateurs internes à l'établissement (`id`, `email`, `full_name`, `password_hash`, `role` valant `ADMIN`, `ENSEIGNANT` ou `ETUDIANT`, `class_name` pour le rattachement de classe ou filière, `created_at`)[cite: 1]. Avant chaque création (`POST /api/admin/users`), l'API vérifie que le nombre total de comptes est strictement inférieur à `MAX_USERS`[cite: 1].
 * **`xapi_statements` (Brique LRS xAPI)** :
-  * Lorsqu'un étudiant saisit une note depuis son interface, le frontend construit un Statement xAPI conforme au standard ADL (`actor`, `verb`, `object`, `result`, `context`) et l'envoie à `POST /xapi/statements`[cite: 1, 4].
+  * Lorsqu'un étudiant saisit une note depuis son interface (champ numérique acceptant désormais **2 décimales de `.01` à `.99`**, avec `step="0.01"`), le frontend construit un Statement xAPI conforme au standard ADL (`actor`, `verb`, `object`, `result`, `context`) et l'envoie à `POST /xapi/statements`[cite: 1, 4].
   * Le statement complet est stocké nativement au format `JSONB` de PostgreSQL dans la colonne `statement_json`, accompagné des colonnes relationnelles `statement_uuid`, `student_id`, `course_name`, `verb`, `score_raw`, `score_max`, `score_scaled` et `timestamp`[cite: 1].
-* **`student_alerts` (Diagnostic analytique)** :
-  * Table mise à jour après chaque insertion de statement xAPI via la fonction `recompute_student_analytics(db, student_id)`[cite: 1].
-  * Calcule la moyenne générale (`average_score`), l'évolution récente (`recent_trend`, différence entre la moyenne des 2 dernières notes et les notes précédentes) et identifie la matière la plus faible (`weakest_course`)[cite: 1].
-  * Attribue un niveau de risque (`risk_level`) et génère une recommandation pédagogique (`recommendation`) selon les seuils suivants[cite: 1] :
-    * `CRITIQUE` : `avg_score < 8.5` ou (`avg_score < 10.5` et `trend <= -2.0`) -> Entretien individuel d'urgence, inscription au tutorat encadré dans la matière faible et parcours de remédiation hebdomadaire[cite: 1].
-    * `VIGILANCE` : `avg_score < 11.5` ou `trend <= -1.5` -> Fiches d'exercices ciblés, quiz d'auto-évaluation et binôme d'entraide avec un pair[cite: 1].
-    * `STABLE` : Autres cas -> Maintien du rythme actuel et exercices d'approfondissement[cite: 1].
+* **`student_alerts` (Indicateurs statistiques, Coaching IA Gemini & Appréciation Enseignant)** :
+  * Table mise à jour après chaque insertion de statement xAPI via la fonction `recompute_student_analytics(db, student_id)` pour calculer les indicateurs chiffrés (`average_score`, `recent_trend`, `weakest_course`, `risk_level` : `CRITIQUE`, `VIGILANCE`, `STABLE`)[cite: 1].
+  * **🤖 Coaching IA Gemini (Visible UNIQUEMENT côté enseignant, déclenchement MANUEL)** :
+    * L'ancien algorithme de génération automatique de texte est remplacé par un appel à l'API **Google Gemini** (`GEMINI_MODEL`, par défaut `gemini-2.5-flash`) via la fonction `generate_student_ai_coaching(db, student)` et `build_gemini_coaching_prompt(...)`.
+    * Le prompt injecte dynamiquement en variables le profil de l'élève (`full_name`, `class_name`, `average_score`, `recent_trend`, `risk_level`, `weakest_course`), ses moyennes détaillées par matière et l'historique chronologique de ses notes xAPI. Si `GEMINI_API_KEY` n'est pas configurée dans `.env`, un moteur de simulation Gemini intelligent utilise ces mêmes variables du prompt pour produire le coaching.
+    * **Économie de tokens (déclenchement manuel)** : Aucune génération IA n'est exécutée automatiquement à la saisie d'une note. L'enseignant dispose d'un **bouton global** (`POST /api/teacher/ai-coaching/all`) pour générer tous les coachings IA d'un coup, et d'un **bouton individuel par élève** (`POST /api/teacher/ai-coaching/{student_id}`) pour ne générer ou régénérer que celui d'un élève précis.
+    * Ce message de coaching IA (`recommendation` / `ai_coaching`) n'est **jamais renvoyé à l'étudiant** (`GET /api/student/me`).
+  * **💬 Système d'Appréciation Enseignant (Affiché côté étudiant)** :
+    * L'enseignant peut saisir et publier un message d'appréciation personnalisé pour chaque élève (`POST /api/teacher/appreciation/{student_id}`, stocké dans `teacher_appreciation`, `appreciation_author`, `appreciation_updated_at`).
+    * Ce message personnalisé est affiché directement sur le tableau de bord de l'étudiant concerné dans l'encadré **« 💬 Appréciation personnalisée de votre enseignant »**.
 
 ---
 
@@ -159,5 +162,5 @@ Si la base est neuve (`count <= 1`) et que `MAX_USERS >= 16`, l'établissement e
 * **Routes API d'un Stack Établissement (`tenant-stack/main.py`)** :
   * Informations & Auth : `GET /api/info`, `POST /api/auth/login`, `POST /api/auth/demo-switch/{target_role}`[cite: 1, 4].
   * Admin École : `GET /api/admin/users`, `POST /api/admin/users`, `DELETE /api/admin/users/{user_id}`, `POST /api/admin/users/import-csv` (import groupé de comptes avec contrôle strict du quota MAX_USERS), `GET /api/admin/users/csv-template` (modèle CSV téléchargeable)[cite: 1, 4].
-  * Étudiant & LRS xAPI : `POST /xapi/statements`, `GET /api/student/me` (avec moyennes par matière et timestamps pour le graphique temporel)[cite: 1, 4].
-  * Enseignant : `GET /api/teacher/analytics`, `GET /api/teacher/chart-data` (séries temporelles pour comparateur d'élèves, tendance de la promotion, moyennes par matière et distribution des notes)[cite: 1, 4].
+  * Étudiant & LRS xAPI : `POST /xapi/statements`, `GET /api/student/me` (avec moyennes par matière, timestamps pour le graphique temporel, et `teacher_appreciation` sans exposer le coaching IA)[cite: 1, 4].
+  * Enseignant : `GET /api/teacher/analytics`, `GET /api/teacher/chart-data`, `POST /api/teacher/ai-coaching/all` (génération Gemini globale), `POST /api/teacher/ai-coaching/{student_id}` (génération Gemini unitaire par élève), `POST /api/teacher/appreciation/{student_id}` (publication d'une appréciation personnalisée visible par l'étudiant)[cite: 1, 4].

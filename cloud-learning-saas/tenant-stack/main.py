@@ -1,7 +1,10 @@
 import os
 import csv
 import io
+import json
 import uuid
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -29,6 +32,8 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@ecole.fr")
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "Administrateur Principal")
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-tenant-key")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -84,7 +89,12 @@ class StudentAlert(Base):
     statements_count = Column(Integer, default=0)
     risk_level = Column(String(30), nullable=False)  # CRITIQUE, VIGILANCE, STABLE
     weakest_course = Column(String(120), nullable=True)
-    recommendation = Column(Text, nullable=False)
+    recommendation = Column(Text, nullable=False, default="")  # Message de coaching IA (visible uniquement côté prof)
+    ai_prompt = Column(Text, nullable=True)                    # Dernier prompt envoyé à Gemini
+    ai_coaching_updated_at = Column(DateTime, nullable=True)
+    teacher_appreciation = Column(Text, nullable=True)         # Appréciation personnalisée du prof (affichée côté étudiant)
+    appreciation_author = Column(String(255), nullable=True)
+    appreciation_updated_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -102,6 +112,9 @@ class CreateUserRequest(BaseModel):
 
 class ImportCSVRequest(BaseModel):
     csv_content: str
+
+class TeacherAppreciationRequest(BaseModel):
+    appreciation: str
 
 class XAPIStatementInput(BaseModel):
     actor: Dict[str, Any]
@@ -123,7 +136,12 @@ def get_db():
 
 
 def recompute_student_analytics(db: Session, student_id: int):
-    """Analyse les statements xAPI d'un étudiant et met à jour son diagnostic pédagogique."""
+    """
+    Calcule uniquement les indicateurs statistiques d'un étudiant à partir de ses statements xAPI
+    (moyenne, tendance récente, matière la plus fragile, niveau de vigilance).
+    Ne génère PAS le message de coaching IA : celui-ci est déclenché manuellement par l'enseignant
+    via l'API Gemini afin d'économiser des tokens.
+    """
     records = (
         db.query(XAPIStatementRecord)
         .filter(XAPIStatementRecord.student_id == student_id)
@@ -152,29 +170,14 @@ def recompute_student_analytics(db: Session, student_id: int):
         course_scores.setdefault(r.course_name, []).append(r.score_raw)
     course_avgs = {c: sum(vals) / len(vals) for c, vals in course_scores.items()}
     weakest_course = min(course_avgs, key=course_avgs.get)
-    weakest_val = round(course_avgs[weakest_course], 1)
 
-    # Évaluation du niveau de difficulté et proposition de solution
+    # Évaluation statistique du niveau de vigilance (sans génération de texte automatique)
     if avg_score < 8.5 or (avg_score < 10.5 and trend <= -2.0):
         risk_level = "CRITIQUE"
-        recommendation = (
-            f"Décrochage détecté (moyenne {avg_score}/20, point faible en {weakest_course} à {weakest_val}/20). "
-            f"Solution proposée : Entretien individuel d'urgence, inscription au tutorat encadré en {weakest_course} "
-            f"et activation d'un parcours de remédiation hebdomadaire."
-        )
     elif avg_score < 11.5 or trend <= -1.5:
         risk_level = "VIGILANCE"
-        recommendation = (
-            f"Fragilité identifiée en {weakest_course} ({weakest_val}/20, tendance {trend:+.1f} pts). "
-            f"Solution proposée : Attribution de fiches d'exercices ciblés, quiz d'auto-évaluation "
-            f"et binôme d'entraide avec un pair."
-        )
     else:
         risk_level = "STABLE"
-        recommendation = (
-            f"Progression régulière ({avg_score}/20). "
-            f"Solution proposée : Maintenir le rythme actuel et proposer des exercices d'approfondissement."
-        )
 
     alert = db.query(StudentAlert).filter(StudentAlert.student_id == student_id).first()
     if not alert:
@@ -185,7 +188,7 @@ def recompute_student_analytics(db: Session, student_id: int):
             statements_count=len(scores),
             risk_level=risk_level,
             weakest_course=weakest_course,
-            recommendation=recommendation,
+            recommendation="",  # Généré uniquement à la demande de l'enseignant via Gemini
             updated_at=datetime.utcnow(),
         )
         db.add(alert)
@@ -195,18 +198,183 @@ def recompute_student_analytics(db: Session, student_id: int):
         alert.statements_count = len(scores)
         alert.risk_level = risk_level
         alert.weakest_course = weakest_course
-        alert.recommendation = recommendation
         alert.updated_at = datetime.utcnow()
 
     db.commit()
 
 
+def build_gemini_coaching_prompt(
+    student: User,
+    alert: StudentAlert,
+    records: List[XAPIStatementRecord],
+) -> str:
+    """
+    Construit le prompt pédagogique envoyé à l'API Gemini en injectant en variables
+    le profil de l'étudiant et le détail de ses notes xAPI.
+    """
+    course_scores: Dict[str, List[float]] = {}
+    for r in records:
+        course_scores.setdefault(r.course_name, []).append(r.score_raw)
+
+    course_summary_lines = [
+        f"  - {course} : moyenne {round(sum(vals)/len(vals), 2)}/20 ({len(vals)} évaluation(s), min {min(vals)}/20, max {max(vals)}/20)"
+        for course, vals in sorted(course_scores.items())
+    ]
+    recent_records = records[-8:]
+    grades_history_lines = [
+        f"  - [{r.timestamp.strftime('%d/%m/%Y')}] {r.course_name} ({r.verb}) : {r.score_raw}/20"
+        for r in recent_records
+    ]
+
+    student_class = getattr(student, "class_name", "Générale") or "Générale"
+    prompt = (
+        f"Tu es un assistant IA expert en pédagogie et en Learning Analytics pour l'établissement « {INSTITUTION_NAME} ».\n"
+        f"Rédige une recommandation de COACHING PÉDAGOGIQUE destinée EXCLUSIVEMENT à l'enseignant afin de l'aider à accompagner l'étudiant suivant.\n\n"
+        f"=== VARIABLES ÉTUDIANT ===\n"
+        f"- Nom complet : {student.full_name}\n"
+        f"- Promotion / Classe : {student_class}\n"
+        f"- Moyenne générale : {alert.average_score}/20 (sur {alert.statements_count} notes)\n"
+        f"- Évolution récente : {alert.recent_trend:+.2f} pt(s)\n"
+        f"- Niveau de risque statistique : {alert.risk_level}\n"
+        f"- Matière la plus fragile : {alert.weakest_course}\n\n"
+        f"=== MOYENNES PAR MATIÈRE ===\n"
+        + "\n".join(course_summary_lines)
+        + "\n\n=== DERNIÈRES NOTES xAPI ENREGISTRÉES ===\n"
+        + "\n".join(grades_history_lines)
+        + "\n\n=== CONSIGNE DE GÉNÉRATION ===\n"
+        "En 3 à 4 phrases maximum (en français, ton professionnel et constructif adressé à l'enseignant), "
+        "analyse la dynamique de cet élève en citant ses chiffres clés et propose 2 actions concrètes de coaching "
+        "que le professeur peut mettre en place dès cette semaine."
+    )
+    return prompt
+
+
+def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
+    """
+    Génère une recommandation de coaching IA (via l'API Google Gemini ou simulation intelligente
+    basée sur les variables du prompt) pour un étudiant donné et la sauvegarde en base.
+    """
+    recompute_student_analytics(db, student.id)
+    records = (
+        db.query(XAPIStatementRecord)
+        .filter(XAPIStatementRecord.student_id == student.id)
+        .order_by(XAPIStatementRecord.timestamp.asc())
+        .all()
+    )
+    alert = db.query(StudentAlert).filter(StudentAlert.student_id == student.id).first()
+
+    if not records or not alert:
+        return {
+            "student_id": student.id,
+            "full_name": student.full_name,
+            "generated": False,
+            "source": "none",
+            "ai_coaching": "Aucune note xAPI disponible pour générer un coaching IA sur cet élève.",
+            "prompt_used": "",
+        }
+
+    prompt = build_gemini_coaching_prompt(student, alert, records)
+    coaching_text = ""
+    source = "gemini_simulation"
+
+    # 1. Appel réel à l'API Google Gemini si GEMINI_API_KEY est renseignée
+    if GEMINI_API_KEY:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.65,
+                "maxOutputTokens": 350,
+            },
+        }
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                candidates = resp_data.get("candidates") or []
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    extracted = "".join(p.get("text", "") for p in parts).strip()
+                    if extracted:
+                        coaching_text = extracted
+                        source = f"gemini_api ({GEMINI_MODEL})"
+        except Exception as exc:
+            # En cas d'erreur réseau/quota/clé invalide, bascule transparente sur la simulation contextualisée
+            source = f"gemini_simulation (fallback: {type(exc).__name__})"
+
+    # 2. Simulation IA Gemini contextualisée à partir des variables du prompt
+    if not coaching_text:
+        course_scores: Dict[str, List[float]] = {}
+        for r in records:
+            course_scores.setdefault(r.course_name, []).append(r.score_raw)
+        course_avgs = {c: round(sum(v) / len(v), 2) for c, v in course_scores.items()}
+        weakest_course = alert.weakest_course or min(course_avgs, key=course_avgs.get)
+        weakest_avg = course_avgs.get(weakest_course, alert.average_score)
+        best_course = max(course_avgs, key=course_avgs.get)
+        best_avg = course_avgs.get(best_course, alert.average_score)
+        last_rec = records[-1]
+        student_class = getattr(student, "class_name", "Générale") or "Générale"
+
+        if alert.risk_level == "CRITIQUE":
+            coaching_text = (
+                f"[Coaching IA Gemini • {student.full_name} ({student_class})] "
+                f"Alerte de décrochage prononcée avec une moyenne globale de {alert.average_score}/20 "
+                f"(évolution récente de {alert.recent_trend:+.2f} pts, dernière note à {last_rec.score_raw}/20 en {last_rec.course_name}) "
+                f"et une lacune critique en {weakest_course} ({weakest_avg}/20). "
+                f"Actions de coaching recommandées : (1) planifier un entretien individuel de remédiation cette semaine en s'appuyant sur "
+                f"ses acquis relatifs en {best_course} ({best_avg}/20) pour restaurer la confiance ; "
+                f"(2) découper le module {weakest_course} en micro-objectifs progressifs avec un suivi hebdomadaire en binôme."
+            )
+        elif alert.risk_level == "VIGILANCE":
+            coaching_text = (
+                f"[Coaching IA Gemini • {student.full_name} ({student_class})] "
+                f"Profil en zone de vigilance (moyenne {alert.average_score}/20, dynamique récente de {alert.recent_trend:+.2f} pts) "
+                f"marqué par un écart entre {best_course} ({best_avg}/20) et {weakest_course} ({weakest_avg}/20, dernière note : {last_rec.score_raw}/20 en {last_rec.course_name}). "
+                f"Actions de coaching recommandées : (1) proposer à {student.full_name} une fiche d'entraînement ciblée sur {weakest_course} "
+                f"avant la prochaine évaluation ; (2) faire un point rapide de 10 minutes en fin de TP pour consolider la méthodologie."
+            )
+        else:
+            coaching_text = (
+                f"[Coaching IA Gemini • {student.full_name} ({student_class})] "
+                f"Excellente maîtrise globale ({alert.average_score}/20 sur {alert.statements_count} évaluations, tendance {alert.recent_trend:+.2f} pts), "
+                f"portée par de très bons résultats en {best_course} ({best_avg}/20) et une dernière note de {last_rec.score_raw}/20 en {last_rec.course_name}. "
+                f"Actions de coaching recommandées : (1) valoriser sa régularité et lui proposer un sujet d'approfondissement ou défi avancé en {best_course} ; "
+                f"(2) consolider {weakest_course} ({weakest_avg}/20) ou l'impliquer comme tuteur pair auprès d'un camarade en difficulté."
+            )
+
+    alert.recommendation = coaching_text
+    alert.ai_prompt = prompt
+    alert.ai_coaching_updated_at = datetime.utcnow()
+    alert.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "student_id": student.id,
+        "full_name": student.full_name,
+        "generated": True,
+        "source": source,
+        "ai_coaching": coaching_text,
+        "prompt_used": prompt,
+        "updated_at": alert.ai_coaching_updated_at.strftime("%d/%m/%Y à %H:%M"),
+    }
+
+
 def seed_initial_data():
     Base.metadata.create_all(bind=engine)
-    # Migration défensive : ajout de class_name si le volume DB existait déjà
+    # Migrations défensives si le volume DB existait déjà
     try:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS class_name VARCHAR(120) DEFAULT 'Générale';"))
+            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_prompt TEXT;"))
+            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_coaching_updated_at TIMESTAMP;"))
+            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS teacher_appreciation TEXT;"))
+            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_author VARCHAR(255);"))
+            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_updated_at TIMESTAMP;"))
             conn.commit()
     except Exception:
         pass
@@ -627,7 +795,7 @@ def post_xapi_statement(
 ):
     """Endpoint LRS standardisé : reçoit un statement xAPI JSON, le stocke en JSONB et recalcule le score de risque."""
     stmt_uuid = str(uuid.uuid4())
-    raw_score = float(stmt.result.get("score", {}).get("raw", 0.0))
+    raw_score = round(float(stmt.result.get("score", {}).get("raw", 0.0)), 2)
     max_score = float(stmt.result.get("score", {}).get("max", 20.0))
     scaled_score = round(raw_score / max_score, 4) if max_score > 0 else 0.0
 
@@ -700,7 +868,14 @@ def get_student_dashboard(current: User = Depends(get_current_user), db: Session
             "recent_trend": alert.recent_trend if alert else 0.0,
             "risk_level": alert.risk_level if alert else "SANS_DONNEES",
             "weakest_course": alert.weakest_course if alert else None,
-            "recommendation": alert.recommendation if alert else "Saisissez vos premières notes pour obtenir un bilan personnalisé."
+            # IMPORTANT : Le message de coaching IA (alert.recommendation) est strictement réservé à l'enseignant.
+            # L'étudiant ne reçoit et ne voit que l'appréciation personnalisée rédigée par son enseignant :
+            "teacher_appreciation": (alert.teacher_appreciation if alert and alert.teacher_appreciation else None),
+            "appreciation_author": (alert.appreciation_author if alert and alert.appreciation_author else None),
+            "appreciation_updated_at": (
+                alert.appreciation_updated_at.strftime("%d/%m/%Y à %H:%M")
+                if alert and alert.appreciation_updated_at else None
+            ),
         },
         "course_averages": course_averages,
         "statements": [
@@ -720,7 +895,7 @@ def get_student_dashboard(current: User = Depends(get_current_user), db: Session
     }
 
 
-# ================= VUE 3 : ESPACE ENSEIGNANT (ANALYSE & ÉLÈVES EN DIFFICULTÉ) =================
+# ================= VUE 3 : ESPACE ENSEIGNANT (ANALYSE, COACHING IA GEMINI & APPRÉCIATIONS) =================
 @app.get("/api/teacher/analytics")
 def get_teacher_analytics(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current.role not in ("ENSEIGNANT", "ADMIN"):
@@ -732,6 +907,10 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
     student_rows = []
     for s in students:
         a = alerts_map.get(s.id)
+        ai_text = (a.recommendation or "").strip() if a else ""
+        # Nettoyage rétrocompatible : si une ancienne phrase statique d'avant la mise à jour Gemini est présente sans tag ni date IA
+        if a and ai_text and not a.ai_coaching_updated_at and ("Solution proposée :" in ai_text):
+            ai_text = ""
         student_rows.append({
             "student_id": s.id,
             "full_name": s.full_name,
@@ -742,7 +921,19 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
             "statements_count": a.statements_count if a else 0,
             "risk_level": a.risk_level if a else "SANS_DONNEES",
             "weakest_course": a.weakest_course if a else "-",
-            "recommendation": a.recommendation if a else "Aucune note saisie pour le moment."
+            "ai_coaching": ai_text,
+            "has_ai_coaching": bool(ai_text),
+            "ai_prompt": (a.ai_prompt if a and a.ai_prompt else None),
+            "ai_coaching_updated_at": (
+                a.ai_coaching_updated_at.strftime("%d/%m/%Y à %H:%M")
+                if a and a.ai_coaching_updated_at else None
+            ),
+            "teacher_appreciation": (a.teacher_appreciation if a and a.teacher_appreciation else ""),
+            "appreciation_author": (a.appreciation_author if a and a.appreciation_author else None),
+            "appreciation_updated_at": (
+                a.appreciation_updated_at.strftime("%d/%m/%Y à %H:%M")
+                if a and a.appreciation_updated_at else None
+            ),
         })
 
     # Tri par niveau d'urgence (CRITIQUE en premier, puis VIGILANCE, puis STABLE)
@@ -761,6 +952,11 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
     class_avg = round(sum(scored_vals) / len(scored_vals), 2) if scored_vals else 0.0
 
     return {
+        "gemini_info": {
+            "configured": bool(GEMINI_API_KEY),
+            "model": GEMINI_MODEL,
+            "mode": "API Google Gemini active" if GEMINI_API_KEY else "Simulation Gemini (variables du prompt)",
+        },
         "summary": {
             "total_students": len(students),
             "class_average": class_avg,
@@ -780,6 +976,102 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
             }
             for rec, usr in recent_xapi
         ]
+    }
+
+
+@app.post("/api/teacher/ai-coaching/all")
+def trigger_ai_coaching_all_students(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Déclenchement manuel global : génère les recommandations de coaching IA Gemini
+    pour tous les élèves disposant de notes dans l'établissement.
+    """
+    if current.role not in ("ENSEIGNANT", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
+
+    students = db.query(User).filter(User.role == "ETUDIANT").order_by(User.full_name.asc()).all()
+    results = []
+    generated_count = 0
+    for s in students:
+        res = generate_student_ai_coaching(db, s)
+        results.append(res)
+        if res.get("generated"):
+            generated_count += 1
+
+    return {
+        "generated_count": generated_count,
+        "total_students": len(students),
+        "model": GEMINI_MODEL,
+        "results": results,
+    }
+
+
+@app.post("/api/teacher/ai-coaching/{student_id}")
+def trigger_ai_coaching_single_student(
+    student_id: int,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Déclenchement manuel unitaire (pour économiser des tokens) : génère la recommandation
+    de coaching IA Gemini uniquement pour l'étudiant ciblé.
+    """
+    if current.role not in ("ENSEIGNANT", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
+
+    student = db.query(User).filter(User.id == student_id, User.role == "ETUDIANT").first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Étudiant introuvable")
+
+    return generate_student_ai_coaching(db, student)
+
+
+@app.post("/api/teacher/appreciation/{student_id}")
+def save_teacher_appreciation(
+    student_id: int,
+    req: TeacherAppreciationRequest,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Permet à l'enseignant d'enregistrer ou modifier une appréciation personnalisée
+    qui sera affichée sur le tableau de bord de l'étudiant.
+    """
+    if current.role not in ("ENSEIGNANT", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
+
+    student = db.query(User).filter(User.id == student_id, User.role == "ETUDIANT").first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Étudiant introuvable")
+
+    alert = db.query(StudentAlert).filter(StudentAlert.student_id == student_id).first()
+    if not alert:
+        alert = StudentAlert(
+            student_id=student_id,
+            average_score=0.0,
+            recent_trend=0.0,
+            statements_count=0,
+            risk_level="SANS_DONNEES",
+            weakest_course="-",
+            recommendation="",
+            updated_at=datetime.utcnow(),
+        )
+        db.add(alert)
+
+    clean_msg = (req.appreciation or "").strip()
+    alert.teacher_appreciation = clean_msg if clean_msg else None
+    alert.appreciation_author = current.full_name if clean_msg else None
+    alert.appreciation_updated_at = datetime.utcnow() if clean_msg else None
+    db.commit()
+
+    return {
+        "student_id": student.id,
+        "full_name": student.full_name,
+        "teacher_appreciation": alert.teacher_appreciation or "",
+        "appreciation_author": alert.appreciation_author,
+        "appreciation_updated_at": (
+            alert.appreciation_updated_at.strftime("%d/%m/%Y à %H:%M")
+            if alert.appreciation_updated_at else None
+        ),
     }
 
 
