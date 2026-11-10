@@ -181,3 +181,14 @@ E. Commandes utiles au quotidien sur le VPS :
 
 - Si Traefik ne détecte aucun conteneur Docker (erreur de droits sur le socket) :
   sudo chmod 666 /var/run/docker.sock
+
+# =============================================================================
+# Assistant Pédagogique IA & Données Brutes (Enseignant)
+# =============================================================================
+- L'espace enseignant propose des conseils pédagogiques IA générés à la demande (par élève ou pour la classe entière).
+- L'interface enseignant est épurée de tout jargon technique (pas de mention de "Gemini", "tokens", ou "JSONB").
+- Pour inspecter le prompt envoyé et la réponse brute reçue de l'IA (JSON / Text brut), cliquer sur le menu déroulant :
+  « 🔍 Données brutes de l'IA (Prompt & Réponse brute reçue) » sous chaque carte de conseil IA.
+- Le quota maxOutputTokens est fixé à 2048 pour éviter toute coupure de génération avec les modèles d'IA récents.
+- Les appréciations saisies par le professeur sont transmises directement sur l'espace personnel de l'élève.
+

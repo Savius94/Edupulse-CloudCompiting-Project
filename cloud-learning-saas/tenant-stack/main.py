@@ -33,7 +33,7 @@ ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "Administrateur Principal")
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-tenant-key")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -90,7 +90,8 @@ class StudentAlert(Base):
     risk_level = Column(String(30), nullable=False)  # CRITIQUE, VIGILANCE, STABLE
     weakest_course = Column(String(120), nullable=True)
     recommendation = Column(Text, nullable=False, default="")  # Message de coaching IA (visible uniquement côté prof)
-    ai_prompt = Column(Text, nullable=True)                    # Dernier prompt envoyé à Gemini
+    ai_prompt = Column(Text, nullable=True)                    # Dernier prompt envoyé à l'IA
+    ai_raw_response = Column(Text, nullable=True)              # Réponse brute reçue de l'IA (JSON / Texte brut)
     ai_coaching_updated_at = Column(DateTime, nullable=True)
     teacher_appreciation = Column(Text, nullable=True)         # Appréciation personnalisée du prof (affichée côté étudiant)
     appreciation_author = Column(String(255), nullable=True)
@@ -209,8 +210,8 @@ def build_gemini_coaching_prompt(
     records: List[XAPIStatementRecord],
 ) -> str:
     """
-    Construit le prompt pédagogique envoyé à l'API Gemini en injectant en variables
-    le profil de l'étudiant et le détail de ses notes xAPI.
+    Construit le prompt pédagogique envoyé au modèle d'IA en injectant en variables
+    le profil de l'étudiant et le détail de ses notes.
     """
     course_scores: Dict[str, List[float]] = {}
     for r in records:
@@ -228,8 +229,8 @@ def build_gemini_coaching_prompt(
 
     student_class = getattr(student, "class_name", "Générale") or "Générale"
     prompt = (
-        f"Tu es un assistant IA expert en pédagogie et en Learning Analytics pour l'établissement « {INSTITUTION_NAME} ».\n"
-        f"Rédige une recommandation de COACHING PÉDAGOGIQUE destinée EXCLUSIVEMENT à l'enseignant afin de l'aider à accompagner l'étudiant suivant.\n\n"
+        f"Tu es un conseiller pédagogique expert en Learning Analytics pour l'établissement « {INSTITUTION_NAME} ».\n"
+        f"Rédige une recommandation de coaching pédagogique personnalisée destinée à l'enseignant pour l'aider à accompagner son étudiant.\n\n"
         f"=== VARIABLES ÉTUDIANT ===\n"
         f"- Nom complet : {student.full_name}\n"
         f"- Promotion / Classe : {student_class}\n"
@@ -239,20 +240,20 @@ def build_gemini_coaching_prompt(
         f"- Matière la plus fragile : {alert.weakest_course}\n\n"
         f"=== MOYENNES PAR MATIÈRE ===\n"
         + "\n".join(course_summary_lines)
-        + "\n\n=== DERNIÈRES NOTES xAPI ENREGISTRÉES ===\n"
+        + "\n\n=== DERNIÈRES NOTES ENREGISTRÉES ===\n"
         + "\n".join(grades_history_lines)
-        + "\n\n=== CONSIGNE DE GÉNÉRATION ===\n"
-        "En 3 à 4 phrases maximum (en français, ton professionnel et constructif adressé à l'enseignant), "
-        "analyse la dynamique de cet élève en citant ses chiffres clés et propose 2 actions concrètes de coaching "
-        "que le professeur peut mettre en place dès cette semaine."
+        + "\n\n=== CONSIGNE DE RÉDACTION ===\n"
+        "Rédige une analyse concise et directe en 3 à 4 phrases (en français, ton professionnel et bienveillant destiné au professeur). "
+        "Synthétise la trajectoire de l'élève en citant ses chiffres clés et propose 2 actions concrètes de coaching à mettre en place dès cette semaine. "
+        "Important : Ne commence PAS par des formules de politesse ou de salutation (pas de 'Bonjour', 'Cher enseignant', etc.), entre directement dans le diagnostic pédagogique."
     )
     return prompt
 
 
 def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
     """
-    Génère une recommandation de coaching IA (via l'API Google Gemini ou simulation intelligente
-    basée sur les variables du prompt) pour un étudiant donné et la sauvegarde en base.
+    Génère une recommandation de coaching pédagogique via l'IA pour un étudiant donné
+    et sauvegarde le conseil ainsi que le prompt et la réponse brute en base.
     """
     recompute_student_analytics(db, student.id)
     records = (
@@ -269,22 +270,24 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
             "full_name": student.full_name,
             "generated": False,
             "source": "none",
-            "ai_coaching": "Aucune note xAPI disponible pour générer un coaching IA sur cet élève.",
+            "ai_coaching": "Aucune note disponible pour analyser cet élève.",
             "prompt_used": "",
+            "raw_response": "",
         }
 
     prompt = build_gemini_coaching_prompt(student, alert, records)
     coaching_text = ""
-    source = "gemini_simulation"
+    raw_response_str = ""
+    source = "simulation"
 
-    # 1. Appel réel à l'API Google Gemini si GEMINI_API_KEY est renseignée
+    # 1. Appel réel à l'API IA si GEMINI_API_KEY est renseignée
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.65,
-                "maxOutputTokens": 350,
+                "temperature": 0.7,
+                "maxOutputTokens": 2048,
             },
         }
         try:
@@ -294,20 +297,46 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                resp_data = json.loads(resp.read().decode("utf-8"))
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                resp_bytes = resp.read()
+                raw_decoded = resp_bytes.decode("utf-8")
+                resp_data = json.loads(raw_decoded)
+                try:
+                    raw_response_str = json.dumps(resp_data, indent=2, ensure_ascii=False)
+                except Exception:
+                    raw_response_str = raw_decoded
+
                 candidates = resp_data.get("candidates") or []
                 if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    extracted = "".join(p.get("text", "") for p in parts).strip()
+                    candidate = candidates[0]
+                    parts = candidate.get("content", {}).get("parts", [])
+                    # Dans les modèles avec pensée (thinking), filtrer les parts thought: True
+                    text_parts = [p.get("text", "") for p in parts if not p.get("thought", False)]
+                    if not text_parts:
+                        text_parts = [p.get("text", "") for p in parts]
+                    extracted = "".join(text_parts).strip()
                     if extracted:
                         coaching_text = extracted
-                        source = f"gemini_api ({GEMINI_MODEL})"
+                        source = "api_ia"
+        except urllib.error.HTTPError as http_err:
+            try:
+                err_body = http_err.read().decode("utf-8")
+                raw_response_str = json.dumps({
+                    "status_code": http_err.code,
+                    "reason": http_err.reason,
+                    "error_body": json.loads(err_body) if err_body.startswith("{") else err_body,
+                }, indent=2, ensure_ascii=False)
+            except Exception:
+                raw_response_str = f"HTTP Error {http_err.code}: {http_err.reason}"
+            source = f"simulation (erreur HTTP {http_err.code})"
         except Exception as exc:
-            # En cas d'erreur réseau/quota/clé invalide, bascule transparente sur la simulation contextualisée
-            source = f"gemini_simulation (fallback: {type(exc).__name__})"
+            raw_response_str = json.dumps({
+                "error": str(exc),
+                "type": type(exc).__name__,
+            }, indent=2, ensure_ascii=False)
+            source = f"simulation (secours: {type(exc).__name__})"
 
-    # 2. Simulation IA Gemini contextualisée à partir des variables du prompt
+    # 2. Simulation pédagogique contextualisée (si pas de clé ou si échec API)
     if not coaching_text:
         course_scores: Dict[str, List[float]] = {}
         for r in records:
@@ -322,8 +351,7 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
 
         if alert.risk_level == "CRITIQUE":
             coaching_text = (
-                f"[Coaching IA Gemini • {student.full_name} ({student_class})] "
-                f"Alerte de décrochage prononcée avec une moyenne globale de {alert.average_score}/20 "
+                f"Alerte de décrochage prononcée pour {student.full_name} ({student_class}) avec une moyenne globale de {alert.average_score}/20 "
                 f"(évolution récente de {alert.recent_trend:+.2f} pts, dernière note à {last_rec.score_raw}/20 en {last_rec.course_name}) "
                 f"et une lacune critique en {weakest_course} ({weakest_avg}/20). "
                 f"Actions de coaching recommandées : (1) planifier un entretien individuel de remédiation cette semaine en s'appuyant sur "
@@ -332,23 +360,33 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
             )
         elif alert.risk_level == "VIGILANCE":
             coaching_text = (
-                f"[Coaching IA Gemini • {student.full_name} ({student_class})] "
-                f"Profil en zone de vigilance (moyenne {alert.average_score}/20, dynamique récente de {alert.recent_trend:+.2f} pts) "
+                f"Profil en zone de vigilance pour {student.full_name} ({student_class}) (moyenne {alert.average_score}/20, dynamique récente de {alert.recent_trend:+.2f} pts) "
                 f"marqué par un écart entre {best_course} ({best_avg}/20) et {weakest_course} ({weakest_avg}/20, dernière note : {last_rec.score_raw}/20 en {last_rec.course_name}). "
                 f"Actions de coaching recommandées : (1) proposer à {student.full_name} une fiche d'entraînement ciblée sur {weakest_course} "
-                f"avant la prochaine évaluation ; (2) faire un point rapide de 10 minutes en fin de TP pour consolider la méthodologie."
+                f"avant la prochaine évaluation ; (2) faire un point méthodologique de 10 minutes en fin de séance pour consolider les notions clés."
             )
         else:
             coaching_text = (
-                f"[Coaching IA Gemini • {student.full_name} ({student_class})] "
-                f"Excellente maîtrise globale ({alert.average_score}/20 sur {alert.statements_count} évaluations, tendance {alert.recent_trend:+.2f} pts), "
+                f"Excellente maîtrise globale pour {student.full_name} ({student_class}) ({alert.average_score}/20 sur {alert.statements_count} évaluations, tendance {alert.recent_trend:+.2f} pts), "
                 f"portée par de très bons résultats en {best_course} ({best_avg}/20) et une dernière note de {last_rec.score_raw}/20 en {last_rec.course_name}. "
                 f"Actions de coaching recommandées : (1) valoriser sa régularité et lui proposer un sujet d'approfondissement ou défi avancé en {best_course} ; "
-                f"(2) consolider {weakest_course} ({weakest_avg}/20) ou l'impliquer comme tuteur pair auprès d'un camarade en difficulté."
+                f"(2) consolider {weakest_course} ({weakest_avg}/20) ou l'inviter à parrainer un camarade de promotion."
             )
+
+        if not raw_response_str:
+            raw_response_str = json.dumps({
+                "statut": "simulation_locale_active",
+                "message": "Génération pédagogique locale basée sur les notes et les variables du prompt.",
+                "etudiant": student.full_name,
+                "classe": student_class,
+                "moyenne": alert.average_score,
+                "matiere_fragile": weakest_course,
+                "coaching": coaching_text,
+            }, indent=2, ensure_ascii=False)
 
     alert.recommendation = coaching_text
     alert.ai_prompt = prompt
+    alert.ai_raw_response = raw_response_str
     alert.ai_coaching_updated_at = datetime.utcnow()
     alert.updated_at = datetime.utcnow()
     db.commit()
@@ -360,6 +398,7 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
         "source": source,
         "ai_coaching": coaching_text,
         "prompt_used": prompt,
+        "raw_response": raw_response_str,
         "updated_at": alert.ai_coaching_updated_at.strftime("%d/%m/%Y à %H:%M"),
     }
 
@@ -371,6 +410,7 @@ def seed_initial_data():
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS class_name VARCHAR(120) DEFAULT 'Générale';"))
             conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_prompt TEXT;"))
+            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_raw_response TEXT;"))
             conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_coaching_updated_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS teacher_appreciation TEXT;"))
             conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_author VARCHAR(255);"))
@@ -924,6 +964,7 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
             "ai_coaching": ai_text,
             "has_ai_coaching": bool(ai_text),
             "ai_prompt": (a.ai_prompt if a and a.ai_prompt else None),
+            "ai_raw_response": (a.ai_raw_response if a and a.ai_raw_response else None),
             "ai_coaching_updated_at": (
                 a.ai_coaching_updated_at.strftime("%d/%m/%Y à %H:%M")
                 if a and a.ai_coaching_updated_at else None
@@ -952,10 +993,9 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
     class_avg = round(sum(scored_vals) / len(scored_vals), 2) if scored_vals else 0.0
 
     return {
-        "gemini_info": {
-            "configured": bool(GEMINI_API_KEY),
-            "model": GEMINI_MODEL,
-            "mode": "API Google Gemini active" if GEMINI_API_KEY else "Simulation Gemini (variables du prompt)",
+        "ai_info": {
+            "active": True,
+            "label": "Assistant Pédagogique IA activé",
         },
         "summary": {
             "total_students": len(students),
