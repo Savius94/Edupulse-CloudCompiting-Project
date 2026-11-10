@@ -1,8 +1,9 @@
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3
     container_name: saas-traefik
     environment:
+      DOCKER_API_VERSION: "1.44"
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       NO_PROXY: "*"

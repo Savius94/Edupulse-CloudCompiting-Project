@@ -26,7 +26,7 @@ Les technologies ont été sélectionnées pour minimiser l'empreinte mémoire (
 | Couche | Technologie / Image Docker | Rôle et Justification |
 | :--- | :--- | :--- |
 | **DNS & Réseau** | Enregistrements DNS `A` + Wildcard | `edupulse.mnbll.fr` et `*.edupulse.mnbll.fr` pointent vers l'IP publique de la VM. |
-| **Reverse Proxy** | **Traefik v3.0** (`traefik:v3.0`) | Découverte automatique des nouveaux stacks via le socket Docker et routage par sous-domaine (`Host()`). |
+| **Reverse Proxy** | **Traefik v3** (`traefik:v3`) | Découverte automatique des nouveaux stacks via le socket Docker et routage par sous-domaine (`Host()`). Compatible Docker 29+ (API 1.44+). |
 | **Backend Portail** | **Python 3.11 + FastAPI** (`python:3.11-slim`) | API REST du portail, monitoring système (`psutil`) et orchestration Docker (`docker compose` / SDK). |
 | **BDD Portail** | **PostgreSQL 16 Alpine** (`postgres:16-alpine`) | Stocke les comptes du portail (`SUPER_ADMIN`, `SUBSCRIPTION_ADMIN`) et le registre des stacks déployés. |
 | **Backend Stack École** | **Python 3.11 + FastAPI** (`python:3.11-slim`) | Serveur métier de l'école, endpoint LRS xAPI (`/xapi/statements`), contrôle du quota et moteur d'analyse. |
