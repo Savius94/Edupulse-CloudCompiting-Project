@@ -3,7 +3,6 @@ services:
     image: traefik:v3.1
     container_name: saas-traefik
     environment:
-      DOCKER_API_VERSION: "1.45"
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       NO_PROXY: "*"
@@ -15,9 +14,11 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=saas-public-net"
-      - "--entrypoints.web.address=:8000"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web8000.address=:8000"
+      - "--log.level=INFO"
     ports:
-      - "80:8000"
+      - "80:80"
       - "8000:8000"
       - "8080:8080"
     volumes:
@@ -81,8 +82,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saas-public-net"
-      - "traefik.http.routers.portal.rule=Host(`edupulse.mnbll.fr`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
-      - "traefik.http.routers.portal.entrypoints=web"
+      - "traefik.http.routers.portal.rule=Host(`edupulse.mnbll.fr`) || Host(`www.edupulse.mnbll.fr`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
       - "traefik.http.services.portal.loadbalancer.server.port=8000"
     networks:
       - saas-public-net

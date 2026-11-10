@@ -56,7 +56,6 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=saas-public-net"
       - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
-      - "traefik.http.routers.${TENANT_SLUG}.entrypoints=web"
       - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
     networks:
       - saas-public-net

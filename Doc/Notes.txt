@@ -33,7 +33,7 @@ Depuis la machine de développement (dans le dossier du projet) :
    git commit -m "feat: ajout de l'import CSV utilisateurs et graphiques d'évolution"
 
 4. Poser un tag de version (jalon pour pouvoir revenir en arrière facilement) :
-   git tag -a v2.2-csv-import -m "Version 2.2 : Import CSV et Visualisation analytique"
+   git tag -a v2.x-custom-name -m "Version 2.2 : Import CSV et Visualisation analytique"
 
 5. Envoyer le code et les tags vers GitHub :
    git push origin main
@@ -153,8 +153,21 @@ D. Mises à jour ultérieures sur le VPS (Pull & Rebuild) :
 
 E. Commandes utiles au quotidien sur le VPS :
 --------------------------------------------
-- Voir les logs en direct du portail :
+- Réinitialiser la base à zéro (effacer les anciens comptes de test et ne garder QUE le Super-Admin) :
+  cd cloud-learning-saas
+  docker compose down -v                 # Le -v détruit le volume portal_db_data
+  docker container prune -f              # Supprime les anciens conteneurs de stacks arrêtés
+  docker volume prune -f                 # Supprime les volumes orphelins des anciens stacks
+  docker compose up -d --build           # Relance avec BDD vierge + SuperAdmin unique
+
+- Voir les logs Traefik (si erreur "404 page not found") :
+  docker compose logs -f saas-traefik
+
+- Voir les logs du portail :
   docker compose logs -f portal-api
+
+- Ouvrir le tableau de bord Traefik (liste en temps réel des routers et hôtes détectés) :
+  http://<IP_DU_VPS>:8080/dashboard/
 
 - Voir l'état de tous les conteneurs du serveur :
   docker ps -a
@@ -165,5 +178,5 @@ E. Commandes utiles au quotidien sur le VPS :
 - Redémarrer le socle :
   docker compose restart
 
-- Si erreur de droits sur le socket Docker (/var/run/docker.sock) :
+- Si Traefik ne détecte aucun conteneur Docker (erreur de droits sur le socket) :
   sudo chmod 666 /var/run/docker.sock
