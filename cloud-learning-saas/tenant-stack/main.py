@@ -2,7 +2,9 @@ import os
 import csv
 import io
 import json
+import time
 import uuid
+import socket
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
@@ -33,7 +35,7 @@ ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "Administrateur Principal")
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-tenant-key")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-2.5-flash-lite"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -404,54 +406,70 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
 
 
 def seed_initial_data():
-    Base.metadata.create_all(bind=engine)
-    # Migrations défensives si le volume DB existait déjà
+    # Attente résiliente de PostgreSQL (indispensable en mode Docker Swarm où tenant-db et tenant-app démarrent en parallèle)
+    for attempt in range(20):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            break
+        except Exception:
+            if attempt == 19:
+                raise
+            time.sleep(1.5)
+
+    # Verrou consultatif PostgreSQL pour éviter toute condition de concurrence si plusieurs réplicas Swarm démarrent en même temps
     try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS class_name VARCHAR(120) DEFAULT 'Générale';"))
-            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_prompt TEXT;"))
-            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_raw_response TEXT;"))
-            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_coaching_updated_at TIMESTAMP;"))
-            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS teacher_appreciation TEXT;"))
-            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_author VARCHAR(255);"))
-            conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_updated_at TIMESTAMP;"))
-            conn.commit()
+        with engine.connect() as lock_conn:
+            lock_conn.execute(text("SELECT pg_advisory_lock(424242);"))
+            try:
+                Base.metadata.create_all(bind=engine)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS class_name VARCHAR(120) DEFAULT 'Générale';"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_prompt TEXT;"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_raw_response TEXT;"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_coaching_updated_at TIMESTAMP;"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS teacher_appreciation TEXT;"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_author VARCHAR(255);"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS appreciation_updated_at TIMESTAMP;"))
+                    conn.commit()
+
+                db = SessionLocal()
+                try:
+                    # 1. Créer le compte Administrateur Principal issu du Portail d'accueil
+                    admin = db.query(User).filter(User.email == ADMIN_EMAIL).first()
+                    if not admin:
+                        password_hash = ADMIN_PASSWORD_HASH if ADMIN_PASSWORD_HASH else pwd_context.hash("AdminPass123!")
+                        admin = User(
+                            email=ADMIN_EMAIL,
+                            full_name=ADMIN_FULL_NAME,
+                            password_hash=password_hash,
+                            role="ADMIN",
+                            class_name="Direction / Admin"
+                        )
+                        db.add(admin)
+                        db.commit()
+
+                    # 2. SEEDING DE DÉMONSTRATION STRICTEMENT CONDITIONNEL :
+                    # Uniquement si le nom officiel de l'établissement débute par "demo" (ex: "Demo School", "demo-ecole"),
+                    # que la base est neuve (au plus 1 utilisateur, l'admin) et que le quota le permet.
+                    # Tout établissement dont le nom ne débute pas par "demo" arrive ENTIÈREMENT VIDE (uniquement l'admin de base).
+                    # Les données et scénarios de démonstration sont entièrement configurables dans demo_data.py
+                    if is_demo_institution(INSTITUTION_NAME) and db.query(User).count() <= 1 and MAX_USERS >= 16:
+                        seed_demo_dataset(
+                            db=db,
+                            pwd_context=pwd_context,
+                            tenant_slug=TENANT_SLUG,
+                            institution_name=INSTITUTION_NAME,
+                            recompute_analytics_fn=recompute_student_analytics,
+                            user_model=User,
+                            statement_model=XAPIStatementRecord,
+                        )
+                finally:
+                    db.close()
+            finally:
+                lock_conn.execute(text("SELECT pg_advisory_unlock(424242);"))
     except Exception:
         pass
-
-    db = SessionLocal()
-    try:
-        # 1. Créer le compte Administrateur Principal issu du Portail d'accueil
-        admin = db.query(User).filter(User.email == ADMIN_EMAIL).first()
-        if not admin:
-            password_hash = ADMIN_PASSWORD_HASH if ADMIN_PASSWORD_HASH else pwd_context.hash("AdminPass123!")
-            admin = User(
-                email=ADMIN_EMAIL,
-                full_name=ADMIN_FULL_NAME,
-                password_hash=password_hash,
-                role="ADMIN",
-                class_name="Direction / Admin"
-            )
-            db.add(admin)
-            db.commit()
-
-        # 2. SEEDING DE DÉMONSTRATION STRICTEMENT CONDITIONNEL :
-        # Uniquement si le nom officiel de l'établissement débute par "demo" (ex: "Demo School", "demo-ecole"),
-        # que la base est neuve (au plus 1 utilisateur, l'admin) et que le quota le permet.
-        # Tout établissement dont le nom ne débute pas par "demo" arrive ENTIÈREMENT VIDE (uniquement l'admin de base).
-        # Les données et scénarios de démonstration sont entièrement configurables dans demo_data.py
-        if is_demo_institution(INSTITUTION_NAME) and db.query(User).count() <= 1 and MAX_USERS >= 16:
-            seed_demo_dataset(
-                db=db,
-                pwd_context=pwd_context,
-                tenant_slug=TENANT_SLUG,
-                institution_name=INSTITUTION_NAME,
-                recompute_analytics_fn=recompute_student_analytics,
-                user_model=User,
-                statement_model=XAPIStatementRecord,
-            )
-    finally:
-        db.close()
 
 
 @app.on_event("startup")
@@ -498,7 +516,8 @@ def get_stack_info(db: Session = Depends(get_db)):
         "current_users": total_users,
         "remaining_slots": max(0, MAX_USERS - total_users),
         "total_xapi_statements": total_statements,
-        "admin_email": ADMIN_EMAIL
+        "admin_email": ADMIN_EMAIL,
+        "replica_id": socket.gethostname()
     }
 
 

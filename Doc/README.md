@@ -25,6 +25,20 @@ Elle injecte dynamiquement les variables d'environnement propres au client dans 
 * `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `ADMIN_FULL_NAME` : Identifiants du compte client sur le portail, utilisés au premier démarrage du stack pour créer automatiquement le compte Administrateur Principal de l'école avec le même mot de passe haché (Bcrypt)[cite: 1, 3, 7].
 * `TENANT_PORT` : Port hôte direct calculé selon la formule `8100 + tenant.id` (ex: `8101` pour le premier stack, `8102` pour le second)[cite: 7].
 
+### 1.2 Architecture Docker Swarm & Piliers Cloud (Elasticity, Scalability, Agility)
+La plateforme supporte nativement **Docker Swarm** (`docker stack deploy` et `docker service scale`) avec repli automatique sur Docker Compose si Swarm n'est pas initialisé :
+* **Scalability (Scalabilité Horizontale & Verticale)** :
+  * Chaque abonnement définit un quota d'utilisateurs, des limites CPU/RAM (`deploy.resources.limits`) et un nombre initial de réplicas (`Plan 200` = 1 réplica [1↔3], `Plan 500` = 2 réplicas [1↔5], `Plan 1000` = 3 réplicas [2↔8]).
+  * Le Super-Admin peut augmenter ou réduire à chaud le nombre de réplicas de n'importe quel établissement (`POST /api/superadmin/tenants/{slug}/scale` → `docker service scale <slug>_tenant-app=<N>`), avec équilibrage de charge automatique par Traefik et le Swarm Ingress Routing Mesh.
+* **Elasticity (Élasticité & Auto-Scaling Dynamique)** :
+  * Le moteur d'auto-scaling (`evaluate_autoscale` dans `portal/main.py`) surveille la charge CPU/RAM du cluster :
+    * **Scale-Out automatique** dès que `CPU >= 70%` (ou `RAM >= 85%`) jusqu'à `max_replicas`.
+    * **Scale-In automatique** lorsque `CPU <= 30%` jusqu'à `min_replicas` pour libérer les ressources inutilisées.
+  * Un simulateur de pic de charge (`POST /api/superadmin/autoscale/simulate-load`) est intégré au panneau Super-Admin pour démontrer l'auto-scaling en direct lors d'une soutenance.
+* **Agility (Agilité, Self-Healing & Zero-Downtime Rolling Updates)** :
+  * Les services utilisent `update_config: { parallelism: 1, delay: 5s, order: start-first, failure_action: rollback }` et `restart_policy: { condition: on-failure }`.
+  * Le bouton **« 🔄 Rolling Update »** (`POST /api/superadmin/tenants/{slug}/rolling-update`) permet de mettre à jour les conteneurs d'une école un par un sans aucune interruption de service.
+
 ---
 
 ## 2. Arborescence du Projet
@@ -84,7 +98,7 @@ Le projet centralise le trafic HTTP public via **Traefik** qui écoute directeme
 * **`student_alerts` (Indicateurs statistiques, Conseils IA & Appréciation Enseignant)** :
   * Table mise à jour après chaque insertion de statement xAPI via la fonction `recompute_student_analytics(db, student_id)` pour calculer les indicateurs chiffrés (`average_score`, `recent_trend`, `weakest_course`, `risk_level` : `CRITIQUE`, `VIGILANCE`, `STABLE`)[cite: 1].
   * **💡 Conseil Pédagogique IA (Visible UNIQUEMENT côté enseignant, déclenchement MANUEL)** :
-    * L'ancien algorithme de génération automatique de texte est remplacé par un appel au modèle d'IA ultra-léger et économique **`gemini-2.5-flash-lite`** (ou simulation locale intelligente si aucune clé n'est fournie) via la fonction `generate_student_ai_coaching(db, student)` et `build_gemini_coaching_prompt(...)`.
+    * L'ancien algorithme de génération automatique de texte est remplacé par un appel au modèle d'IA ultra-léger et économique **`gemini-3.5-flash-lite`** (ou simulation locale intelligente si aucune clé n'est fournie) via la fonction `generate_student_ai_coaching(db, student)` et `build_gemini_coaching_prompt(...)`.
     * Le prompt injecte dynamiquement en variables le profil de l'élève (`full_name`, `class_name`, `average_score`, `recent_trend`, `risk_level`, `weakest_course`), ses moyennes détaillées par matière et l'historique chronologique de ses notes xAPI.
     * **Plafond de tokens & Réponse complète** : `maxOutputTokens` configuré à 2048 pour éviter toute troncature du texte généré et supporter les modèles avec phase de raisonnement (thinking).
     * **Inspection des données brutes** : La table `student_alerts` stocke à la fois `ai_prompt` et `ai_raw_response` (JSON brut reçu de l'API). Un panneau repliable *« 🔍 Données brutes de l'IA (Prompt & Réponse brute reçue) »* permet au professeur ou à l'évaluateur d'examiner le prompt exact et le retour brut complet de l'IA.

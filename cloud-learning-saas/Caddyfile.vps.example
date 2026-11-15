@@ -1,0 +1,42 @@
+# =============================================================================
+# EXEMPLE DE CONFIGURATION CADDY SUR LE VPS RELAIS (AVEC TAILSCALE)
+# =============================================================================
+# Remplacez 100.x.y.1, 100.x.y.2, 100.x.y.3 par les IP Tailscale de vos 3 VMs
+# (obtenues avec la commande `tailscale ip -4` sur chaque VM).
+# Grâce au Routing Mesh de Docker Swarm, les 3 VMs répondent sur le port 80 !
+
+# --- OPTION A : HTTP simple (Fonctionne immédiatement sans configuration SSL wildcard) ---
+http://edupulse.mnbll.fr, http://*.edupulse.mnbll.fr {
+    reverse_proxy http://100.x.y.1:80 http://100.x.y.2:80 http://100.x.y.3:80 {
+        lb_policy round_robin
+        fail_duration 10s
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# --- OPTION B : HTTPS Automatique (avec On-Demand TLS pour tous les sous-domaines *.edupulse.mnbll.fr) ---
+# Si vous souhaitez activer le HTTPS automatique sur tous les sous-domaines d'écoles sans plugin DNS :
+# 1. Décommentez le bloc global ci-dessous (tout en haut de votre Caddyfile) :
+# {
+#     on_demand_tls {
+#         ask http://100.x.y.1:80/
+#     }
+# }
+#
+# 2. Et utilisez ce bloc :
+# edupulse.mnbll.fr, *.edupulse.mnbll.fr {
+#     tls {
+#         on_demand
+#     }
+#     reverse_proxy http://100.x.y.1:80 http://100.x.y.2:80 http://100.x.y.3:80 {
+#         lb_policy round_robin
+#         fail_duration 10s
+#         header_up Host {host}
+#         header_up X-Real-IP {remote_host}
+#         header_up X-Forwarded-For {remote_host}
+#         header_up X-Forwarded-Proto {scheme}
+#     }
+# }

@@ -1,7 +1,6 @@
 services:
   tenant-db:
     image: postgres:16-alpine
-    container_name: ${TENANT_SLUG}-db
     environment:
       POSTGRES_USER: tenant_user
       POSTGRES_PASSWORD: tenant_password
@@ -16,6 +15,21 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
 
   tenant-app:
     build:
@@ -28,10 +42,6 @@ services:
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
     image: edupulse-tenant-app:latest
-    container_name: ${TENANT_SLUG}-app
-    env_file:
-      - path: ../.env
-        required: false
     environment:
       DATABASE_URL: postgresql://tenant_user:tenant_password@tenant-db:5432/tenant_db
       TENANT_SLUG: ${TENANT_SLUG}
@@ -42,7 +52,7 @@ services:
       ADMIN_FULL_NAME: "${ADMIN_FULL_NAME:-Administrateur Principal}"
       JWT_SECRET: "${JWT_SECRET:-super-secret-tenant-key}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash-lite}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-3.5-flash-lite}"
       HTTP_PROXY: "${HTTP_PROXY:-}"
       HTTPS_PROXY: "${HTTPS_PROXY:-}"
       NO_PROXY: "${NO_PROXY:-}"
@@ -52,8 +62,7 @@ services:
     ports:
       - "${TENANT_PORT:-8101}:8000"
     depends_on:
-      tenant-db:
-        condition: service_healthy
+      - tenant-db
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saas-public-net"
@@ -63,12 +72,43 @@ services:
       - saas-public-net
       - tenant-internal-net
     restart: unless-stopped
+    deploy:
+      replicas: ${REPLICAS:-1}
+      placement:
+        preferences:
+          - spread: node.id
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-0.50}"
+          memory: "${MEM_LIMIT:-512M}"
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=saas-public-net"
+        - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
+        - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
 
 networks:
   saas-public-net:
     external: true
+    name: saas-public-net
   tenant-internal-net:
-    driver: bridge
+    driver: ${TENANT_NET_DRIVER:-overlay}
+    attachable: true
 
 volumes:
   tenant_db_data:

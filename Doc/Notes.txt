@@ -8,8 +8,9 @@ profs : Demo123!
 éleve: Demo123!
 
 Todo:
-- IA pour les commentaire
+- [FAIT] IA pour les commentaires (Google Gemini + inspecteur de prompt/réponse brute)
 - [FAIT] Automatiser les bonnes redirections vers les pages et établissements (DNS wildcard *.edupulse.mnbll.fr et domaine edupulse.mnbll.fr)
+- [FAIT] Conversion en architecture Docker Swarm avec Elasticity, Scalability et Agility
 - Ajouter un boutton pour aceder a l'interface d'admin de stack pour les user sans devois se reconnecter a chaque fois (ou laisser comme ca)
 
 Fait:
@@ -18,6 +19,7 @@ Fait:
 - Résolution intelligente et dynamique de toutes les redirections et liens (création d'établissement, listes d'espaces, super-admin, retour vers portail) quel que soit le contexte (domaine, localhost ou IP)
 - Module analytique visuel complet (graphiques d'évolution, comparateur d'élèves, moyennes par matière, distribution)
 - Importation groupée des utilisateurs par fichier CSV avec contrôle du quota et modèle téléchargeable (UserDemo.csv)
+- Architecture Docker Swarm complète (réseaux overlay attachables, réplicas, Auto-Scaling Elasticity, Horizontal Scalability, Rolling Updates Zero-Downtime Agility)
 
 =============================================================================
 1. PROCÉDURE POUR SAUVEGARDER SUR GITHUB (AVEC VERSIONNEMENT)
@@ -31,10 +33,10 @@ Depuis la machine de développement (dans le dossier du projet) :
    git add .
 
 3. Créer un commit avec un message descriptif :
-   git commit -m "feat: ajout de l'import CSV utilisateurs et graphiques d'évolution"
+   git commit -m "feat: architecture Docker Swarm avec Elasticity, Scalability et Agility"
 
 4. Poser un tag de version (jalon pour pouvoir revenir en arrière facilement) :
-   git tag -a v2.x-custom-name -m "Version 2.2 : Import CSV et Visualisation analytique"
+   git tag -a v3.0-swarm -m "Version 3.0 : Docker Swarm (Elasticity, Scalability, Agility)"
 
 5. Envoyer le code et les tags vers GitHub :
    git push origin main
@@ -47,7 +49,7 @@ Depuis la machine de développement (dans le dossier du projet) :
 
 
 =============================================================================
-2. PROCÉDURE POUR DÉPLOYER & LANCER SUR UN VPS
+2. PROCÉDURE POUR DÉPLOYER & LANCER SUR UN VPS (AVEC DOCKER SWARM)
 =============================================================================
 
 A. Prérequis sur le VPS (si machine neuve Ubuntu/Debian) :
@@ -69,126 +71,183 @@ A. Prérequis sur le VPS (si machine neuve Ubuntu/Debian) :
    newgrp docker
 
 4. Ouvrir les ports sur le pare-feu du VPS (UFW ou console cloud) :
-   sudo ufw allow 22/tcp       # SSH
-   sudo ufw allow 80/tcp       # HTTP standard Traefik (edupulse.mnbll.fr et *.edupulse.mnbll.fr SANS port)
-   sudo ufw allow 8000/tcp     # Traefik secondaire (rétrocompatibilité)
-   sudo ufw allow 8001/tcp     # Portail direct de secours
-   sudo ufw allow 8080/tcp     # Dashboard Traefik
+   sudo ufw allow 22/tcp        # SSH
+   sudo ufw allow 80/tcp        # HTTP standard Traefik (edupulse.mnbll.fr et *.edupulse.mnbll.fr SANS port)
+   sudo ufw allow 8000/tcp      # Traefik secondaire (rétrocompatibilité)
+   sudo ufw allow 8001/tcp      # Portail direct de secours
+   sudo ufw allow 8080/tcp      # Dashboard Traefik
    sudo ufw allow 8101:8150/tcp # Ports directs des stacks écoles (8100 + id)
+   sudo ufw allow 2377/tcp      # Docker Swarm Management (si multi-noeuds)
+   sudo ufw allow 7946/tcp      # Docker Swarm Node Communication
+   sudo ufw allow 7946/udp
+   sudo ufw allow 4789/udp      # Docker Swarm Overlay Network (VXLAN)
    sudo ufw reload
 
 
-B. Configuration Réseau Spéciale Proxy (VPS Université UPPA) :
----------------------------------------------------------------
-Le réseau du VPS école passe obligatoirement par le proxy cache.univ-pau.fr:3128 pour accéder à Internet.
+B. Initialiser Docker Swarm & Déployer le projet :
+--------------------------------------------------
+1. Activer le mode Docker Swarm sur le serveur (à faire 1 seule fois) :
+   docker swarm init
+   (Si le VPS a plusieurs interfaces réseau, préciser l'IP : docker swarm init --advertise-addr <IP_DU_VPS>)
 
-1. Configuration du fichier .env du projet :
-   Le fichier cloud-learning-saas/.env contient déjà la configuration requise :
-   HTTP_PROXY=http://cache.univ-pau.fr:3128
-   HTTPS_PROXY=http://cache.univ-pau.fr:3128
-   NO_PROXY=127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr,portal-db,tenant-db,traefik
-   http_proxy=http://cache.univ-pau.fr:3128
-   https_proxy=http://cache.univ-pau.fr:3128
-   no_proxy=127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr,portal-db,tenant-db,traefik
+2. Aller dans le dossier du socle Docker :
+   cd cloud-learning-saas
 
-2. Configuration du démon Docker pour 'docker pull' (si non encore fait sur la VM) :
-   sudo mkdir -p /etc/systemd/system/docker.service.d
-   sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf <<EOF
-   [Service]
-   Environment="HTTP_PROXY=http://cache.univ-pau.fr:3128"
-   Environment="HTTPS_PROXY=http://cache.univ-pau.fr:3128"
-   Environment="NO_PROXY=127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr"
-   EOF
-   sudo systemctl daemon-reload
-   sudo systemctl restart docker
+3. Construire l'image de base des stacks d'établissements (utilisée par Swarm) :
+   docker build -t edupulse-tenant-app:latest ./tenant-stack
 
-3. Configuration client Docker ~/.docker/config.json :
-   mkdir -p ~/.docker
-   cat <<EOF > ~/.docker/config.json
-   {
-    "proxies": {
-      "default": {
-        "httpProxy": "http://cache.univ-pau.fr:3128",
-        "httpsProxy": "http://cache.univ-pau.fr:3128",
-        "noProxy": "127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.univ-pau.fr,*.mnbll.fr"
-      }
-    }
-   }
-   EOF
+4. Démarrer le Control Plane (Traefik + Portal-DB + Portal-API sur réseau overlay) :
+   docker compose up -d --build
+   (Ou en stack Swarm pure : docker stack deploy -c docker-compose.yml edupulse)
+
+5. Vérifier le cluster Swarm et les services :
+   docker node ls
+   docker stack ls
+   docker service ls
 
 
-C. Premier déploiement sur le VPS (Cloner & Lancer) :
------------------------------------------------------
-1. Cloner le dépôt GitHub privé :
+C. Configuration Réseau & Proxy (Que fait quoi ? Comment changer d'hébergeur ?) :
+---------------------------------------------------------------------------------
+Voici le rôle exact de chaque élément réseau pour pouvoir migrer facilement hors de l'université :
+
+1. Le Proxy Sortant de l'École (`HTTP_PROXY` / `HTTPS_PROXY` dans `.env`) :
+   - À quoi ça sert : Uniquement sur le VPS de l'université (UPPA) qui bloque l'accès direct à Internet et oblige à passer par `http://cache.univ-pau.fr:3128` pour télécharger les paquets Python/apt et appeler l'API Google Gemini.
+   - Où c'est configuré :
+     a) Dans `cloud-learning-saas/.env` (variables `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`).
+     b) Sur le système Linux du VPS UPPA (`/etc/systemd/system/docker.service.d/http-proxy.conf` et `~/.docker/config.json`).
+   - Que faire quand vous changez d'hébergeur (OVH, Hostinger, AWS, DigitalOcean, PC local) :
+     -> Dans `cloud-learning-saas/.env`, laissez `HTTP_PROXY=`, `HTTPS_PROXY=`, `http_proxy=`, `https_proxy=` VIDES !
+     -> Sur un nouveau VPS hors UPPA, ne créez PAS `/etc/systemd/system/docker.service.d/http-proxy.conf` ni `~/.docker/config.json`.
+
+2. Le Reverse-Proxy Entrant (`traefik` dans `docker-compose.yml`) :
+   - À quoi ça sert : C'est l'aiguilleur frontal qui écoute sur le port `80` du serveur. Il lit le nom de domaine demandé par le visiteur (`Host(...)`) et redirige la requête vers le bon conteneur :
+     * `edupulse.mnbll.fr` -> `portal-api:8000`
+     * `<slug>.edupulse.mnbll.fr` -> les réplicas `<slug>_tenant-app:8000` en équilibrant la charge (Load Balancing).
+   - Remarque importante : Dans `docker-compose.yml`, Traefik force `HTTP_PROXY: ""` et `NO_PROXY: "*"` pour ne jamais envoyer le trafic interne des conteneurs vers le proxy de l'université.
+
+3. Le Réseau Inter-Conteneurs (`saas-public-net` dans `docker-compose.yml` & `docker-compose.tenant.yml`) :
+   - À quoi ça sert : C'est le réseau virtuel Docker (`driver: overlay` avec `attachable: true`) qui relie Traefik au Portail et à tous les stacks d'établissements, tout en isolant les bases de données PostgreSQL (`portal-internal-net` et `tenant-internal-net`).
+
+4. Le Domaine & DNS (`BASE_DOMAIN` dans `.env` + zone DNS chez votre registrar ex: IONOS) :
+   - À quoi ça sert : Définit le nom de domaine principal (`BASE_DOMAIN=edupulse.mnbll.fr`).
+   - Que faire quand vous changez d'hébergeur (nouvelle adresse IP publique) :
+     -> Allez dans votre console DNS (ex: IONOS) et remplacez l'ancienne IP par la nouvelle IP de votre VPS sur les 2 entrées `A` :
+        * `@` (ou `edupulse`) -> `<NOUVELLE_IP_VPS>`
+        * `*` (ou `*.edupulse`) -> `<NOUVELLE_IP_VPS>`
+     -> Aucun changement de code n'est nécessaire si vous gardez le même nom de domaine !
+
+
+D. Commandes Docker Swarm utiles pour la soutenance (Elasticity, Scalability, Agility) :
+----------------------------------------------------------------------------------------
+- Voir les noeuds du cluster Swarm :
+  docker node ls
+
+- Voir tous les stacks déployés (établissements) :
+  docker stack ls
+
+- Voir les services et le nombre de réplicas en temps réel :
+  docker service ls
+
+- Voir les conteneurs (tâches Swarm) d'un établissement (ex: school1) :
+  docker stack ps school1
+
+- Scaler manuellement un établissement en ligne de commande (ou via les boutons - / + du Super-Admin) :
+  docker service scale school1_tenant-app=3
+
+- Lancer un Rolling Update Zero-Downtime en ligne de commande (ou via le bouton Rolling Update du Super-Admin) :
+  docker service update --force school1_tenant-app
+
+
+=============================================================================
+3. ARCHITECTURE HYBRIDE : VPS RELAIS (CADDY + TAILSCALE) -> 3 VMs SWARM (PC MAISON)
+=============================================================================
+
+Schéma du flux réseau :
+Visiteur (Internet)
+   │  DNS : edupulse.mnbll.fr et *.edupulse.mnbll.fr -> IP Publique du VPS
+   ▼
+[ VPS Public (Relais Edge) ]
+   ├── Conteneur Caddy (Ports 80 / 443)
+   └── Tailscale (tag:edupulse)
+         │  Tunnel chiffré WireGuard / Tailscale (100.x.y.z)
+         ▼
+[ PC Maison : Cluster Docker Swarm 3 VMs (tag:edupulse) ]
+   ├── VM 1 (Swarm Manager) : Traefik (:80) + Portal-API + Portal-DB + Tenant-DBs + Réplicas App
+   ├── VM 2 (Swarm Worker)  : Réplicas Tenant-App (Scalabilité / Élasticité)
+   └── VM 3 (Swarm Worker)  : Réplicas Tenant-App (Scalabilité / Élasticité)
+
+-----------------------------------------------------------------------------
+ÉTAPE 1 : Configurer l'ACL "tag:edupulse" dans la console Tailscale
+-----------------------------------------------------------------------------
+1. Allez sur https://login.tailscale.com/admin/acls
+2. Dans la politique ACL (JSON / HuJSON), déclarez `tag:edupulse` et autorisez les machines portant ce tag à communiquer entre elles (notamment ports 80/8000 pour Caddy->Traefik, et ports Docker Swarm 2377/tcp, 7946/tcp+udp, 4789/udp entre les 3 VMs) :
+
+   "tagOwners": {
+     "tag:edupulse": ["autogroup:admin"]
+   },
+   "acls": [
+     {
+       "action": "accept",
+       "src": ["tag:edupulse"],
+       "dst": ["tag:edupulse:*"]
+     }
+   ]
+
+-----------------------------------------------------------------------------
+ÉTAPE 2 : Installer et tagger Tailscale sur le VPS et sur les 3 VMs
+-----------------------------------------------------------------------------
+Sur le VPS ET sur chacune des 3 VMs (VM1, VM2, VM3) :
+1. Installer Tailscale :
+   curl -fsSL https://tailscale.com/install.sh | sh
+
+2. Connecter la machine avec le tag ACL `tag:edupulse` :
+   sudo tailscale up --advertise-tags=tag:edupulse
+
+3. Noter l'adresse IP Tailscale (100.x.y.z) de chaque machine :
+   tailscale ip -4
+   (Exemple : VPS = 100.100.1.10 | VM1 = 100.100.1.1 | VM2 = 100.100.1.2 | VM3 = 100.100.1.3)
+
+-----------------------------------------------------------------------------
+ÉTAPE 3 : Monter le Cluster Docker Swarm sur les 3 VMs (PC Maison)
+-----------------------------------------------------------------------------
+1. Sur VM1 (Noeud Manager principal) :
+   a) Initialiser le cluster Swarm sur l'interface Tailscale (ou LAN local) :
+      docker swarm init --advertise-addr <IP_TAILSCALE_VM1>
+      (Cette commande affiche une commande `docker swarm join --token SWMTKN-1-... <IP_TAILSCALE_VM1>:2377`, copiez-la !)
+
+2. Sur VM2 et VM3 (Noeuds Workers) :
+   a) Coller la commande `docker swarm join` obtenue à l'étape précédente :
+      docker swarm join --token SWMTKN-1-xxxx <IP_TAILSCALE_VM1>:2377
+
+3. Cloner le projet et construire l'image d'établissement sur les 3 VMs (VM1, VM2, VM3) :
+   (Important pour que Docker Swarm puisse placer des réplicas d'écoles sur VM2 et VM3 instantanément)
    git clone https://github.com/Savius94/Edupulse-CloudCompiting-Project.git
-   cd Edupulse-CloudCompiting-Project
+   cd Edupulse-CloudCompiting-Project/cloud-learning-saas
+   docker build -t edupulse-tenant-app:latest ./tenant-stack
 
-2. Se placer dans le dossier du socle Docker :
-   cd cloud-learning-saas
-
-3. Démarrer l'ensemble des conteneurs (Traefik, portal-db, portal-api) :
+4. Sur VM1 uniquement (Manager), lancer le Control Plane :
+   cd ~/Edupulse-CloudCompiting-Project/cloud-learning-saas
    docker compose up -d --build
 
-4. Vérifier que tous les conteneurs sont actifs ("healthy" / "Up") :
-   docker compose ps
+5. Vérifier depuis VM1 que les 3 VMs sont bien "Ready" dans le cluster Swarm :
+   docker node ls
 
+-----------------------------------------------------------------------------
+ÉTAPE 4 : Configurer le conteneur Caddy sur le VPS Relais
+-----------------------------------------------------------------------------
+1. Sur votre VPS, le conteneur Caddy doit pouvoir joindre l'IP Tailscale de VM1 (100.x.y.1) :
+   - Si Caddy tourne en `network_mode: host` (ou directement sur le VPS), il voit nativement `100.x.y.1`.
+   - Dans votre `Caddyfile` sur le VPS (voir `cloud-learning-saas/Caddyfile.vps.example`), ajoutez :
 
-D. Mises à jour ultérieures sur le VPS (Pull & Rebuild) :
----------------------------------------------------------
-À chaque fois que vous poussez des nouveautés depuis votre PC vers GitHub :
+   http://edupulse.mnbll.fr, http://*.edupulse.mnbll.fr {
+       reverse_proxy http://<IP_TAILSCALE_VM1>:80 http://<IP_TAILSCALE_VM2>:80 http://<IP_TAILSCALE_VM3>:80 {
+           lb_policy round_robin
+           fail_duration 10s
+           header_up Host {host}
+       }
+   }
 
-1. Se connecter en SSH au VPS :
-   ssh user@<IP_DU_VPS>
+   (Ou avec HTTPS On-Demand TLS — voir les détails dans `cloud-learning-saas/Caddyfile.vps.example`).
 
-2. Aller dans le dossier du projet et récupérer la dernière version :
-   cd Edupulse-CloudCompiting-Project
-   git pull origin main
-
-3. Reconstruire et relancer les conteneurs mis à jour :
-   cd cloud-learning-saas
-   docker compose up -d --build
-
-4. Si besoin de relancer un stack d'établissement mis à jour :
-   docker compose -p <slug> -f tenant-stack/docker-compose.tenant.yml up -d --build
-
-
-E. Commandes utiles au quotidien sur le VPS :
---------------------------------------------
-- Réinitialiser la base à zéro (effacer les anciens comptes de test et ne garder QUE le Super-Admin) :
-  cd cloud-learning-saas
-  docker compose down -v                 # Le -v détruit le volume portal_db_data
-  docker container prune -f              # Supprime les anciens conteneurs de stacks arrêtés
-  docker volume prune -f                 # Supprime les volumes orphelins des anciens stacks
-  docker compose up -d --build           # Relance avec BDD vierge + SuperAdmin unique
-
-- Voir les logs Traefik (si erreur "404 page not found") :
-  docker compose logs -f saas-traefik
-
-- Voir les logs du portail :
-  docker compose logs -f portal-api
-
-- Ouvrir le tableau de bord Traefik (liste en temps réel des routers et hôtes détectés) :
-  http://<IP_DU_VPS>:8080/dashboard/
-
-- Voir l'état de tous les conteneurs du serveur :
-  docker ps -a
-
-- Arrêter l'ensemble du socle :
-  docker compose down
-
-- Redémarrer le socle :
-  docker compose restart
-
-- Si Traefik ne détecte aucun conteneur Docker (erreur de droits sur le socket) :
-  sudo chmod 666 /var/run/docker.sock
-
-# =============================================================================
-# Assistant Pédagogique IA & Données Brutes (Enseignant)
-# =============================================================================
-- L'espace enseignant propose des conseils pédagogiques IA générés à la demande (par élève ou pour la classe entière).
-- L'interface enseignant est épurée de tout jargon technique (pas de mention de "Gemini", "tokens", ou "JSONB").
-- Pour inspecter le prompt envoyé et la réponse brute reçue de l'IA (JSON / Text brut), cliquer sur le menu déroulant :
-  « 🔍 Données brutes de l'IA (Prompt & Réponse brute reçue) » sous chaque carte de conseil IA.
-- Le quota maxOutputTokens est fixé à 2048 pour éviter toute coupure de génération avec les modèles d'IA récents.
-- Les appréciations saisies par le professeur sont transmises directement sur l'espace personnel de l'élève.
-
+2. Recharger Caddy sur le VPS :
+   docker exec -it <nom-conteneur-caddy> caddy reload --config /etc/caddy/Caddyfile

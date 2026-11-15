@@ -408,10 +408,13 @@
         </button>
       </div>
 
-      <!-- Métriques ressources de la VM -->
+      <!-- Métriques ressources de la VM & Cluster Docker Swarm -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="bg-white p-5 rounded-2xl border border-slate-200">
-          <p class="text-xs text-slate-500 font-medium">Utilisation CPU VM</p>
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-500 font-medium">Utilisation CPU Cluster</p>
+            <span id="badge-cpu-mode" class="hidden text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">SIMULÉ</span>
+          </div>
           <p id="metric-cpu" class="text-2xl font-extrabold text-slate-900 mt-1">-- %</p>
           <div class="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
             <div id="bar-cpu" class="bg-indigo-600 h-full transition-all" style="width: 0%"></div>
@@ -432,9 +435,77 @@
           </div>
         </div>
         <div class="bg-white p-5 rounded-2xl border border-slate-200">
-          <p class="text-xs text-slate-500 font-medium">Stacks Établissements</p>
+          <p class="text-xs text-slate-500 font-medium">Stacks & Réplicas Swarm</p>
           <p id="metric-stacks" class="text-2xl font-extrabold text-indigo-600 mt-1">0 actif(s)</p>
-          <p class="text-xs text-slate-400 mt-2">Isolés via Docker Compose</p>
+          <p id="metric-replicas-sub" class="text-xs text-slate-500 mt-2 font-medium">Orchestration Docker Swarm</p>
+        </div>
+      </div>
+
+      <!-- Piliers Cloud Computing : Docker Swarm (Elasticity, Scalability, Agility) -->
+      <div class="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-5">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div class="space-y-1">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <span class="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                🐝 Docker Swarm Orchestrator
+              </span>
+              <span id="swarm-status-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Vérification du cluster...
+              </span>
+              <button id="btn-init-swarm" onclick="saInitSwarm()" class="hidden px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition">
+                ⚡ Activer Docker Swarm (swarm init)
+              </button>
+            </div>
+            <h2 class="text-lg font-bold text-white pt-1">Piliers Cloud : Elasticity • Scalability • Agility</h2>
+            <p class="text-xs text-slate-400">
+              Auto-Scaling horizontal selon la charge CPU (<strong class="text-slate-200">Scale-Out &ge; 70%</strong> / <strong class="text-slate-200">Scale-In &le; 30%</strong>), réplication à la demande et déploiement continu sans coupure (<em>Zero-Downtime Rolling Update</em>).
+            </p>
+          </div>
+
+          <!-- Boutons de test d'Élasticité en direct (Soutenance / Démo) -->
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="saSimulateLoad(88)" class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5">
+              <span>🔥 Simuler Pic (88% CPU → Scale-Out)</span>
+            </button>
+            <button onclick="saSimulateLoad(15)" class="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5">
+              <span>❄️ Simuler Calme (15% CPU → Scale-In)</span>
+            </button>
+            <button onclick="saSimulateLoad(null)" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition">
+              📡 Sonde Réelle
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="p-4 rounded-xl bg-slate-800/70 border border-slate-700/70 space-y-1">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-indigo-400">1. Scalability (Scalabilité)</span>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Répartition de charge Traefik + Swarm Ingress Mesh sur plusieurs réplicas (<code class="text-indigo-300">docker service scale</code>) et quotas par abonnement (200 / 500 / 1000).
+            </p>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-800/70 border border-slate-700/70 space-y-1">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400">2. Elasticity (Élasticité Auto)</span>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Allocation et libération automatique de conteneurs entre <code class="text-emerald-300">min_replicas</code> et <code class="text-emerald-300">max_replicas</code> selon la pression CPU/RAM en temps réel.
+            </p>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-800/70 border border-slate-700/70 space-y-1">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-amber-400">3. Agility (Agilité & Rolling Update)</span>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Provisioning multi-tenant en 1 clic, auto-guérison (<code class="text-amber-300">on-failure</code>) et mises à jour progressives sans interruption (<code class="text-amber-300">order: start-first</code>).
+            </p>
+          </div>
+        </div>
+
+        <!-- Journal des événements d'orchestration Swarm / Auto-Scaling -->
+        <div class="bg-slate-950/80 rounded-xl p-4 border border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Journal d'Orchestration Temps Réel (Swarm / Auto-Scaler)</span>
+            <span id="swarm-nodes-summary" class="text-[11px] font-mono text-slate-400">Noeuds: 1 | Services: --</span>
+          </div>
+          <div id="sa-cloud-events" class="space-y-1.5 max-h-36 overflow-y-auto font-mono text-xs text-slate-300">
+            <p class="text-slate-500 text-xs">En attente d'événements d'orchestration...</p>
+          </div>
         </div>
       </div>
 
@@ -462,19 +533,23 @@
         </form>
       </div>
 
-      <!-- Liste de tous les Stacks Docker -->
+      <!-- Liste de tous les Stacks Docker Swarm -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200">
-        <h2 class="text-base font-bold text-slate-900 mb-4">Stacks d'établissements déployés</h2>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <h2 class="text-base font-bold text-slate-900">Stacks d'établissements déployés (Contrôle Scalabilité, Élasticité & Agilité)</h2>
+          <span class="text-xs text-slate-500">Utilisez <strong>- / +</strong> pour scaler manuellement les réplicas ou activez l'<strong>Auto-Scale</strong></span>
+        </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="border-b border-slate-200 text-xs uppercase text-slate-400">
                 <th class="py-3 px-2">Établissement</th>
                 <th class="py-3 px-2">Accès DNS</th>
-                <th class="py-3 px-2">Compte Propriétaire</th>
                 <th class="py-3 px-2">Plan</th>
+                <th class="py-3 px-2">Scalabilité (Réplicas)</th>
+                <th class="py-3 px-2">Élasticité (Auto-Scale)</th>
                 <th class="py-3 px-2">Statut Stack</th>
-                <th class="py-3 px-2 text-right">Actions</th>
+                <th class="py-3 px-2 text-right">Actions & Agilité</th>
               </tr>
             </thead>
             <tbody id="sa-tenants-tbody" class="divide-y divide-slate-100"></tbody>
@@ -935,8 +1010,11 @@
               <p class="text-xs text-slate-600">
                 Offre souscrite : <strong>${planNames[t.plan_max_users] || (t.plan_max_users + ' utilisateurs max')}</strong>
               </p>
-              <p class="text-xs text-slate-500">
-                Adresse web dédiée : <a href="${primaryUrl}" target="_blank" class="font-semibold text-indigo-600 hover:underline">${displayDomain}</a>
+              <p class="text-xs text-slate-500 flex flex-wrap items-center gap-2">
+                <span>Adresse web dédiée : <a href="${primaryUrl}" target="_blank" class="font-semibold text-indigo-600 hover:underline">${displayDomain}</a></span>
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-[11px] border border-indigo-200">
+                  🐝 ${t.orchestrator || 'SWARM'} : ${t.replicas || 1} réplica(s) actif(s) (Auto-Scale ${t.min_replicas || 1}↔${t.max_replicas || 3})
+                </span>
               </p>
             </div>
 
@@ -1028,35 +1106,111 @@
           const vm = await vmRes.json();
           document.getElementById('metric-cpu').textContent = `${vm.cpu_percent} %`;
           document.getElementById('bar-cpu').style.width = `${Math.min(vm.cpu_percent, 100)}%`;
+          const cpuModeBadge = document.getElementById('badge-cpu-mode');
+          if (cpuModeBadge) {
+            cpuModeBadge.classList.toggle('hidden', !vm.simulated_cpu);
+          }
           document.getElementById('metric-ram').textContent = `${vm.ram_used_mb} / ${vm.ram_total_mb} Mo`;
           document.getElementById('bar-ram').style.width = `${Math.min(vm.ram_percent, 100)}%`;
           document.getElementById('metric-disk').textContent = `${vm.disk_used_gb} / ${vm.disk_total_gb} Go`;
           document.getElementById('bar-disk').style.width = `${Math.min(vm.disk_percent, 100)}%`;
+
+          // Statut du cluster Docker Swarm
+          if (vm.swarm) {
+            const swarmBadge = document.getElementById('swarm-status-badge');
+            const btnInitSwarm = document.getElementById('btn-init-swarm');
+            const nodesSummary = document.getElementById('swarm-nodes-summary');
+            const repSub = document.getElementById('metric-replicas-sub');
+
+            if (vm.swarm.swarm_active) {
+              swarmBadge.textContent = `● Cluster Swarm Actif (${vm.swarm.nodes_count} noeud(s) Manager)`;
+              swarmBadge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+              if (btnInitSwarm) btnInitSwarm.classList.add('hidden');
+            } else {
+              swarmBadge.textContent = '○ Mode Hybride Compose (Swarm non initialisé)';
+              swarmBadge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30';
+              if (btnInitSwarm) btnInitSwarm.classList.remove('hidden');
+            }
+            if (nodesSummary) {
+              nodesSummary.textContent = `Mode: ${vm.swarm.orchestrator_mode} | Noeuds: ${vm.swarm.nodes_count} | Services Swarm: ${vm.swarm.swarm_services_count} | Total Réplicas: ${vm.total_replicas || 0}`;
+            }
+            if (repSub) {
+              repSub.textContent = `${vm.total_replicas || 0} réplica(s) en ligne (${vm.swarm.orchestrator_mode})`;
+            }
+          }
+
+          // Journal d'orchestration (Elasticity / Scalability / Agility)
+          const eventsContainer = document.getElementById('sa-cloud-events');
+          if (eventsContainer && Array.isArray(vm.events) && vm.events.length > 0) {
+            const pillarColors = {
+              ELASTICITY: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+              SCALABILITY: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30',
+              AGILITY: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+              SWARM: 'text-sky-400 bg-sky-500/10 border-sky-500/30'
+            };
+            eventsContainer.innerHTML = vm.events.map(ev => {
+              const badgeCls = pillarColors[ev.pillar] || pillarColors.SWARM;
+              return `
+                <div class="flex items-start gap-2 py-1 border-b border-slate-900 last:border-0">
+                  <span class="text-slate-500 shrink-0">[${ev.timestamp}]</span>
+                  <span class="px-1.5 py-0.2 rounded text-[10px] font-bold border ${badgeCls} shrink-0">${ev.pillar}</span>
+                  <span class="text-slate-200">${ev.message}</span>
+                </div>
+              `;
+            }).join('');
+          }
         }
 
         if (tenantsRes.ok) {
           const tenants = await tenantsRes.json();
-          document.getElementById('metric-stacks').textContent = `${tenants.length} actif(s)`;
+          const totalReps = tenants.reduce((acc, t) => acc + (t.status === 'RUNNING' ? (t.replicas || 1) : 0), 0);
+          document.getElementById('metric-stacks').textContent = `${tenants.length} stack(s) • ${totalReps} rép.`;
           const tbody = document.getElementById('sa-tenants-tbody');
           tbody.innerHTML = tenants.map(t => {
             const tenantUrl = getTenantTargetUrl(t, 'primary');
+            const reps = t.replicas || 1;
+            const minR = t.min_replicas || 1;
+            const maxR = t.max_replicas || 3;
+            const autoOn = t.autoscale_enabled !== false;
+
             return `
             <tr>
-              <td class="py-3 px-2 font-semibold text-slate-900">${t.institution_name}</td>
+              <td class="py-3 px-2">
+                <div class="font-semibold text-slate-900">${t.institution_name}</div>
+                <div class="text-[11px] text-slate-400">${t.owner_email || '-'}</div>
+              </td>
               <td class="py-3 px-2 font-mono text-xs">
                 <a href="${tenantUrl}" target="_blank" class="text-indigo-600 hover:underline flex items-center gap-1 font-semibold">
                   <span>${t.slug}.edupulse.mnbll.fr</span>
                   <span class="text-[10px]">↗</span>
                 </a>
               </td>
-              <td class="py-3 px-2 text-xs text-slate-600">${t.owner_email || '-'}</td>
               <td class="py-3 px-2 text-xs font-semibold">${t.plan_max_users} users</td>
+              <td class="py-3 px-2">
+                <div class="inline-flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200">
+                  <button onclick="saScaleTenant('${t.slug}', -1)" title="Scale-In (-1 réplica)"
+                    class="w-6 h-6 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold text-xs shadow-sm transition">-</button>
+                  <span class="text-xs font-extrabold text-indigo-700 px-1.5">${reps} rép.</span>
+                  <button onclick="saScaleTenant('${t.slug}', 1)" title="Scale-Out (+1 réplica)"
+                    class="w-6 h-6 rounded-lg bg-white hover:bg-slate-200 text-slate-700 font-bold text-xs shadow-sm transition">+</button>
+                </div>
+              </td>
+              <td class="py-3 px-2">
+                <button onclick="saToggleAutoscale('${t.slug}')"
+                  class="text-[11px] font-bold px-2.5 py-1 rounded-full transition border ${autoOn ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'}">
+                  ${autoOn ? `⚡ Auto (${minR}↔${maxR})` : 'Manuel'}
+                </button>
+              </td>
               <td class="py-3 px-2">
                 <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full ${t.status === 'RUNNING' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">
                   ${t.status}
                 </span>
               </td>
-              <td class="py-3 px-2 text-right space-x-2">
+              <td class="py-3 px-2 text-right space-x-2 whitespace-nowrap">
+                <button onclick="saRollingUpdateTenant('${t.slug}')" title="Mise à jour sans coupure (Zero-Downtime Rolling Update)"
+                  class="text-xs font-semibold text-indigo-600 hover:underline">
+                  🔄 Rolling Update
+                </button>
                 <button onclick="saToggleTenant('${t.slug}', '${t.status}')" class="text-xs font-semibold text-amber-600 hover:underline">
                   ${t.status === 'RUNNING' ? 'Stopper' : 'Démarrer'}
                 </button>
@@ -1066,7 +1220,7 @@
               </td>
             </tr>
           `;
-          }).join('') || `<tr><td colspan="6" class="py-6 text-center text-xs text-slate-400">Aucun stack déployé</td></tr>`;
+          }).join('') || `<tr><td colspan="7" class="py-6 text-center text-xs text-slate-400">Aucun stack déployé</td></tr>`;
         }
 
         if (usersRes.ok) {
@@ -1107,6 +1261,48 @@
     async function saToggleTenant(slug, currentStatus) {
       const action = currentStatus === 'RUNNING' ? 'stop' : 'start';
       await fetch(`/api/superadmin/tenants/${slug}/${action}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saScaleTenant(slug, delta) {
+      await fetch(`/api/superadmin/tenants/${slug}/scale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ delta })
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saToggleAutoscale(slug) {
+      await fetch(`/api/superadmin/tenants/${slug}/autoscale-toggle`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saRollingUpdateTenant(slug) {
+      await fetch(`/api/superadmin/tenants/${slug}/rolling-update`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saSimulateLoad(cpuLoad) {
+      await fetch('/api/superadmin/autoscale/simulate-load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ cpu_load: cpuLoad })
+      });
+      refreshSuperAdmin();
+    }
+
+    async function saInitSwarm() {
+      await fetch('/api/superadmin/swarm/init', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });

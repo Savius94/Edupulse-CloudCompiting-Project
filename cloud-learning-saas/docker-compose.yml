@@ -15,8 +15,13 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=saas-public-net"
+      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--providers.swarm.network=saas-public-net"
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.forwardedHeaders.insecure=true"
       - "--entrypoints.web8000.address=:8000"
+      - "--entrypoints.web8000.forwardedHeaders.insecure=true"
       - "--log.level=INFO"
     ports:
       - "80:80"
@@ -27,6 +32,21 @@ services:
     networks:
       - saas-public-net
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
 
   portal-db:
     image: postgres:16-alpine
@@ -45,8 +65,24 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
 
   portal-api:
+    image: edupulse-portal-api:latest
     build:
       context: ./portal
       args:
@@ -56,7 +92,6 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
-    container_name: saas-portal-api
     env_file:
       - .env
     environment:
@@ -66,8 +101,9 @@ services:
       BASE_DOMAIN: ${BASE_DOMAIN:-edupulse.mnbll.fr}
       PUBLIC_PORT: ${PUBLIC_PORT:-80}
       TENANT_COMPOSE_PATH: /app/tenant-stack/docker-compose.tenant.yml
+      ORCHESTRATOR_MODE: ${ORCHESTRATOR_MODE:-auto}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
@@ -80,24 +116,54 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./tenant-stack:/app/tenant-stack
     depends_on:
-      portal-db:
-        condition: service_healthy
+      - portal-db
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saas-public-net"
-      - "traefik.http.routers.portal.rule=Host(`edupulse.mnbll.fr`) || Host(`www.edupulse.mnbll.fr`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
+      - "traefik.http.routers.portal.rule=Host(`${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`www.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
       - "traefik.http.services.portal.loadbalancer.server.port=8000"
     networks:
       - saas-public-net
       - portal-internal-net
     restart: unless-stopped
+    deploy:
+      replicas: ${PORTAL_REPLICAS:-1}
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+        reservations:
+          cpus: "0.15"
+          memory: 128M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=saas-public-net"
+        - "traefik.http.routers.portal.rule=Host(`${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`www.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
+        - "traefik.http.services.portal.loadbalancer.server.port=8000"
 
 networks:
   saas-public-net:
     name: saas-public-net
-    driver: bridge
+    driver: ${NETWORK_DRIVER:-overlay}
+    attachable: true
   portal-internal-net:
-    driver: bridge
+    driver: ${NETWORK_DRIVER:-overlay}
+    attachable: true
 
 volumes:
   portal_db_data:
