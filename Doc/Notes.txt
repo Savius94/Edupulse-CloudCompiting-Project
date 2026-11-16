@@ -8,9 +8,8 @@ profs : Demo123!
 éleve: Demo123!
 
 Todo:
-- [FAIT] IA pour les commentaires (Google Gemini + inspecteur de prompt/réponse brute)
-- [FAIT] Automatiser les bonnes redirections vers les pages et établissements (DNS wildcard *.edupulse.mnbll.fr et domaine edupulse.mnbll.fr)
-- [FAIT] Conversion en architecture Docker Swarm avec Elasticity, Scalability et Agility
+- Obtenire plus d'infos sur le systeme dans le panel admin
+- verifier le focntionnment et en apprendre plsu sur le focntionnement
 - Ajouter un boutton pour aceder a l'interface d'admin de stack pour les user sans devois se reconnecter a chaque fois (ou laisser comme ca)
 
 Fait:
@@ -20,6 +19,9 @@ Fait:
 - Module analytique visuel complet (graphiques d'évolution, comparateur d'élèves, moyennes par matière, distribution)
 - Importation groupée des utilisateurs par fichier CSV avec contrôle du quota et modèle téléchargeable (UserDemo.csv)
 - Architecture Docker Swarm complète (réseaux overlay attachables, réplicas, Auto-Scaling Elasticity, Horizontal Scalability, Rolling Updates Zero-Downtime Agility)
+- [FAIT] IA pour les commentaires (Google Gemini + inspecteur de prompt/réponse brute)
+- [FAIT] Automatiser les bonnes redirections vers les pages et établissements (DNS wildcard *.edupulse.mnbll.fr et domaine edupulse.mnbll.fr)
+- [FAIT] Conversion en architecture Docker Swarm avec Elasticity, Scalability et Agility
 
 =============================================================================
 1. PROCÉDURE POUR SAUVEGARDER SUR GITHUB (AVEC VERSIONNEMENT)

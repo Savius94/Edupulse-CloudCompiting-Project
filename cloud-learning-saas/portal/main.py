@@ -379,17 +379,55 @@ def orchestrate_tenant_stack(
     # MODE 1 : ORCHESTRATION NATIVE DOCKER SWARM (docker stack / docker service)
     # -------------------------------------------------------------------------
     if swarm_mode:
+        # Génère un fichier stack Swarm pré-interpolé (version 3.8, replicas entier, hash bcrypt protégé)
+        raw_yaml = compose_path.read_text(encoding="utf-8")
+        safe_hash = (admin_password_hash or "").replace("$", "$$")
+        rendered_yaml = (
+            raw_yaml
+            .replace("${REPLICAS:-1}", str(int(target_replicas)))
+            .replace("${TENANT_SLUG}", slug)
+            .replace("${INSTITUTION_NAME}", institution_name.replace('"', '\\"'))
+            .replace("${MAX_USERS:-200}", str(plan_max_users))
+            .replace("${ADMIN_EMAIL}", admin_email)
+            .replace("${ADMIN_PASSWORD_HASH}", safe_hash)
+            .replace("${ADMIN_FULL_NAME:-Administrateur Principal}", (admin_name or "Administrateur Principal").replace('"', '\\"'))
+            .replace("${JWT_SECRET:-super-secret-tenant-key}", env.get("JWT_SECRET", "super-secret-tenant-key"))
+            .replace("${GEMINI_API_KEY:-}", env.get("GEMINI_API_KEY", ""))
+            .replace("${GEMINI_MODEL:-gemini-3.5-flash-lite}", env.get("GEMINI_MODEL", "gemini-3.5-flash-lite"))
+            .replace("${HTTP_PROXY:-}", env.get("HTTP_PROXY", ""))
+            .replace("${HTTPS_PROXY:-}", env.get("HTTPS_PROXY", ""))
+            .replace("${NO_PROXY:-}", env.get("NO_PROXY", ""))
+            .replace("${http_proxy:-}", env.get("http_proxy", ""))
+            .replace("${https_proxy:-}", env.get("https_proxy", ""))
+            .replace("${no_proxy:-}", env.get("no_proxy", ""))
+            .replace("${TENANT_PORT:-8101}", str(direct_port))
+            .replace("${BASE_DOMAIN:-edupulse.mnbll.fr}", BASE_DOMAIN)
+            .replace("${CPU_LIMIT:-0.50}", rules["cpu_limit"])
+            .replace("${MEM_LIMIT:-512M}", rules["mem_limit"])
+            .replace("${TENANT_NET_DRIVER:-overlay}", "overlay")
+        )
+        rendered_stack_path = Path(f"/tmp/stack-{slug}.yml")
+        try:
+            rendered_stack_path.write_text(rendered_yaml, encoding="utf-8")
+        except Exception:
+            rendered_stack_path = compose_path
+
         if action == "up":
             ensure_tenant_image_built(compose_path.parent, env)
-            cmd = ["docker", "stack", "deploy", "-c", str(compose_path), slug]
+            cmd = ["docker", "stack", "deploy", "-c", str(rendered_stack_path), slug]
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
-            if res.returncode != 0:
+            if res.returncode == 0:
+                record_cloud_event("AGILITY", slug, f"Déploiement Stack Swarm '{slug}' ({target_replicas} réplica(s), overlay net).")
+                return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
+            # Fallback automatique vers Docker Compose si docker stack deploy rencontre un blocage
+            fallback_up = ["docker", "compose", "-p", slug, "-f", str(compose_path), "up", "-d", "--build"]
+            res_fb = subprocess.run(fallback_up, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
+            if res_fb.returncode != 0:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Erreur Docker Swarm deploy : {res.stderr or res.stdout}",
+                    detail=f"Erreur déploiement Docker : {res.stderr or res_fb.stderr}",
                 )
-            record_cloud_event("AGILITY", slug, f"Déploiement Stack Swarm '{slug}' ({target_replicas} réplica(s), overlay net).")
-            return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
+            return {"executed": True, "mode": "COMPOSE_FALLBACK", "command": " ".join(fallback_up)}
 
         elif action == "scale":
             # Vérifie si le service Swarm existe
@@ -398,7 +436,7 @@ def orchestrate_tenant_stack(
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=60)
             if res.returncode == 0:
                 return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
-            # Fallback si le stack avait été lancé via docker compose avant l'activation de Swarm
+            # Fallback si le stack avait été lancé via docker compose
             fallback_cmd = ["docker", "compose", "-p", slug, "-f", str(compose_path), "up", "-d", "--no-recreate", "--scale", f"tenant-app={target_replicas}"]
             subprocess.run(fallback_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=120)
             return {"executed": True, "mode": "COMPOSE_FALLBACK", "command": " ".join(fallback_cmd)}
@@ -416,33 +454,30 @@ def orchestrate_tenant_stack(
             ]
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             if res.returncode != 0:
-                # Si le stack n'était pas encore un service Swarm, on le redéploie en stack Swarm
-                deploy_cmd = ["docker", "stack", "deploy", "-c", str(compose_path), slug]
+                deploy_cmd = ["docker", "stack", "deploy", "-c", str(rendered_stack_path), slug]
                 subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
                 return {"executed": True, "mode": "SWARM", "command": " ".join(deploy_cmd)}
             return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
 
         elif action == "stop":
-            # En Swarm, scale à 0 ou retrait du stack tout en conservant le volume PostgreSQL
             svc_check = subprocess.run(["docker", "service", "scale", f"{slug}_tenant-app=0"], capture_output=True, text=True)
             if svc_check.returncode != 0:
-                subprocess.run(["docker", "stack", "rm", slug], capture_output=True, text=True, timeout=60)
-                subprocess.run(["docker", "compose", "-p", slug, "-f", str(compose_path), "stop"], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=60)
+                subprocess.run(["docker", "stack", "rm", slug], capture_output=True, text=True, timeout=30)
+                subprocess.run(["docker", "compose", "-p", slug, "-f", str(compose_path), "stop"], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=30)
             return {"executed": True, "mode": "SWARM", "command": f"docker service scale {slug}_tenant-app=0"}
 
         elif action == "start":
-            # Relance les réplicas du service Swarm ou redéploie le stack
             svc_scale = subprocess.run(["docker", "service", "scale", f"{slug}_tenant-app={target_replicas}"], capture_output=True, text=True)
             if svc_scale.returncode != 0:
                 ensure_tenant_image_built(compose_path.parent, env)
-                subprocess.run(["docker", "stack", "deploy", "-c", str(compose_path), slug], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
+                subprocess.run(["docker", "stack", "deploy", "-c", str(rendered_stack_path), slug], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             return {"executed": True, "mode": "SWARM", "command": f"docker service scale {slug}_tenant-app={target_replicas}"}
 
         elif action == "down":
-            subprocess.run(["docker", "stack", "rm", slug], capture_output=True, text=True, timeout=60)
-            subprocess.run(["docker", "compose", "-p", slug, "-f", str(compose_path), "down", "-v"], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=60)
-            time.sleep(2)
-            subprocess.run(["docker", "volume", "rm", "-f", f"{slug}_tenant_db_data"], capture_output=True, text=True, timeout=30)
+            subprocess.run(["docker", "stack", "rm", slug], capture_output=True, text=True, timeout=30)
+            subprocess.run(["docker", "compose", "-p", slug, "-f", str(compose_path), "down", "-v", "--remove-orphans"], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=30)
+            subprocess.run(["docker", "rm", "-f", f"{slug}-app", f"{slug}-db"], capture_output=True, text=True, timeout=15)
+            subprocess.run(["docker", "volume", "rm", "-f", f"{slug}_tenant_db_data"], capture_output=True, text=True, timeout=15)
             return {"executed": True, "mode": "SWARM", "command": f"docker stack rm {slug}"}
 
     # -------------------------------------------------------------------------
@@ -1095,6 +1130,32 @@ def sa_control_tenant(
     return {"status": tenant.status}
 
 
+@app.delete("/api/tenants/{slug}")
+def delete_my_tenant(
+    slug: str,
+    current_user: PortalUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Permet à un client (ou au Super-Admin) de supprimer directement son propre établissement."""
+    tenant = db.query(TenantStack).filter(TenantStack.slug == slug).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Établissement introuvable.")
+    if tenant.owner_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Vous n'êtes pas propriétaire de cet établissement.")
+
+    tenant_id = tenant.id
+    # Suppression immédiate en base de données (évite tout affichage fantôme si déjà supprimé dans Portainer)
+    db.delete(tenant)
+    db.commit()
+
+    try:
+        orchestrate_tenant_stack(action="down", slug=slug, tenant_id=tenant_id)
+    except Exception:
+        pass
+    record_cloud_event("AGILITY", slug, f"Stack '{slug}' supprimé par le client ({current_user.email}).")
+    return {"deleted": slug}
+
+
 @app.delete("/api/superadmin/tenants/{slug}")
 def sa_delete_tenant(
     slug: str,
@@ -1102,13 +1163,15 @@ def sa_delete_tenant(
     db: Session = Depends(get_db),
 ):
     tenant = db.query(TenantStack).filter(TenantStack.slug == slug).first()
-    try:
-        orchestrate_tenant_stack(action="down", slug=slug, tenant_id=tenant.id if tenant else 1)
-    except Exception:
-        pass
+    tenant_id = tenant.id if tenant else 1
+    # Suppression immédiate en base de données (même si le conteneur a déjà été détruit via Portainer)
     if tenant:
         db.delete(tenant)
         db.commit()
+    try:
+        orchestrate_tenant_stack(action="down", slug=slug, tenant_id=tenant_id)
+    except Exception:
+        pass
     record_cloud_event("AGILITY", slug, f"Stack '{slug}' et ses volumes supprimés définitivement.")
     return {"deleted": slug}
 

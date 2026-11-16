@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   tenant-db:
     image: postgres:16-alpine
@@ -66,6 +68,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saas-public-net"
+      - "traefik.swarm.network=saas-public-net"
       - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
       - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
     networks:
@@ -75,8 +78,8 @@ services:
     deploy:
       replicas: ${REPLICAS:-1}
       placement:
-        preferences:
-          - spread: node.id
+        constraints:
+          - node.role == manager
       update_config:
         parallelism: 1
         delay: 5s
@@ -99,13 +102,13 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.docker.network=saas-public-net"
+        - "traefik.swarm.network=saas-public-net"
         - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
         - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
 
 networks:
   saas-public-net:
     external: true
-    name: saas-public-net
   tenant-internal-net:
     driver: ${TENANT_NET_DRIVER:-overlay}
     attachable: true

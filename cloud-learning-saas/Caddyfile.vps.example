@@ -1,15 +1,18 @@
 # =============================================================================
-# EXEMPLE DE CONFIGURATION CADDY SUR LE VPS RELAIS (AVEC TAILSCALE)
+# CONFIGURATION CADDY SUR LE VPS RELAIS (AVEC TAILSCALE)
 # =============================================================================
-# Remplacez 100.x.y.1, 100.x.y.2, 100.x.y.3 par les IP Tailscale de vos 3 VMs
-# (obtenues avec la commande `tailscale ip -4` sur chaque VM).
-# Grâce au Routing Mesh de Docker Swarm, les 3 VMs répondent sur le port 80 !
+# Important : Caddy doit pointer UNIQUEMENT vers l'IP Tailscale de VM1 (100.85.14.115:80),
+# car c'est sur VM1 que tourne le routeur d'entrée Traefik.
+# C'est ensuite Traefik qui répartit la charge sur le réseau Swarm `saas-public-net`.
 
-# --- OPTION A : HTTP simple (Fonctionne immédiatement sans configuration SSL wildcard) ---
-http://edupulse.mnbll.fr, http://*.edupulse.mnbll.fr {
-    reverse_proxy http://100.x.y.1:80 http://100.x.y.2:80 http://100.x.y.3:80 {
-        lb_policy round_robin
-        fail_duration 10s
+# 1. Votre application existante
+mnbll.fr {
+    reverse_proxy 100.116.178.12:8006
+}
+
+# 2. EduPulse Portail Principal (HTTPS Let's Encrypt automatique)
+edupulse.mnbll.fr {
+    reverse_proxy 100.85.14.115:80 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
@@ -17,26 +20,12 @@ http://edupulse.mnbll.fr, http://*.edupulse.mnbll.fr {
     }
 }
 
-# --- OPTION B : HTTPS Automatique (avec On-Demand TLS pour tous les sous-domaines *.edupulse.mnbll.fr) ---
-# Si vous souhaitez activer le HTTPS automatique sur tous les sous-domaines d'écoles sans plugin DNS :
-# 1. Décommentez le bloc global ci-dessous (tout en haut de votre Caddyfile) :
-# {
-#     on_demand_tls {
-#         ask http://100.x.y.1:80/
-#     }
-# }
-#
-# 2. Et utilisez ce bloc :
-# edupulse.mnbll.fr, *.edupulse.mnbll.fr {
-#     tls {
-#         on_demand
-#     }
-#     reverse_proxy http://100.x.y.1:80 http://100.x.y.2:80 http://100.x.y.3:80 {
-#         lb_policy round_robin
-#         fail_duration 10s
-#         header_up Host {host}
-#         header_up X-Real-IP {remote_host}
-#         header_up X-Forwarded-For {remote_host}
-#         header_up X-Forwarded-Proto {scheme}
-#     }
-# }
+# 3. Sous-domaines des Établissements (*.edupulse.mnbll.fr en HTTP sur le port 80)
+http://*.edupulse.mnbll.fr {
+    reverse_proxy 100.85.14.115:80 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
