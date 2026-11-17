@@ -68,11 +68,11 @@ services:
       - saas-public-net
       - tenant-internal-net
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
-      interval: 10s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 45s
+      retries: 6
+      start_period: 60s
     deploy:
       replicas: ${REPLICAS:-2}
       placement:
@@ -83,8 +83,8 @@ services:
       update_config:
         parallelism: 1
         delay: 5s
-        order: start-first
-        failure_action: rollback
+        order: stop-first
+        failure_action: continue
       rollback_config:
         parallelism: 1
         delay: 5s
@@ -107,9 +107,6 @@ services:
         - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
         - "traefik.http.routers.${TENANT_SLUG}.middlewares=${TENANT_SLUG}-retry"
         - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
-        - "traefik.http.services.${TENANT_SLUG}.loadbalancer.healthcheck.path=/api/health"
-        - "traefik.http.services.${TENANT_SLUG}.loadbalancer.healthcheck.interval=3s"
-        - "traefik.http.services.${TENANT_SLUG}.loadbalancer.healthcheck.timeout=1s"
 
 networks:
   saas-public-net:

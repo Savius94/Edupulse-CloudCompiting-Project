@@ -751,11 +751,22 @@ def on_startup():
     try:
         Base.metadata.create_all(bind=engine)
         with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
+            existing_cols = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'tenant_stacks'")
+                ).fetchall()
+            }
+            if "replicas" not in existing_cols:
+                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
+            if "min_replicas" not in existing_cols:
+                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
+            if "max_replicas" not in existing_cols:
+                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
+            if "autoscale_enabled" not in existing_cols:
+                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
+            if "orchestrator" not in existing_cols:
+                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
             conn.commit()
     except Exception as err:
         print(f"[portal-api] Migration SQL warning : {err}", flush=True)
