@@ -216,7 +216,7 @@
           <p class="text-slate-600 text-sm mb-8">Choisissez la capacité correspondant à vos effectifs (étudiants, enseignants et personnel administratif inclus).</p>
 
           <!-- Toggle Mensuel / Annuel -->
-          <div class="inline-flex items-center bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="inline-flex items-center bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
             <button id="btn-billing-monthly" onclick="setBillingCycle('monthly')"
               class="px-5 py-2 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white">
               Facturation Mensuelle
@@ -504,6 +504,7 @@
             </p>
           </div>
 
+          <!-- Boutons de test d'Élasticité en direct (Soutenance / Démo) -->
           <div class="flex flex-wrap items-center gap-2">
             <button onclick="saSimulateLoad(88)" class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5">
               <span>🔥 Simuler Pic (88% CPU → Scale-Out)</span>
@@ -581,7 +582,7 @@
       <div class="bg-white p-6 rounded-2xl border border-slate-200">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
           <h2 class="text-base font-bold text-slate-900">Stacks d'établissements déployés (Contrôle Scalabilité, Élasticité & Agilité)</h2>
-          <span class="text-xs text-slate-500">Utilisez <strong>- / +</strong> pour scaler manuellement les réplicas ou changez le forfait</span>
+          <span class="text-xs text-slate-500">Utilisez <strong>- / +</strong> pour scaler manuellement les réplicas ou activez l'<strong>Auto-Scale</strong></span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
@@ -724,7 +725,7 @@
     </div>
   </footer>
 
-  <!-- ================= LOGIQUE JAVASCRIPT INTEGRÉE ================= -->
+  <!-- ================= LOGIQUE JAVASCRIPT ================= -->
   <script>
     let authMode = 'login';
     let billingCycle = 'monthly';
@@ -732,6 +733,7 @@
     let currentUser = JSON.parse(localStorage.getItem('edupulse_user') || 'null');
     let preselectedPlan = 500;
 
+    // Tarifs Mensuels vs Annuels
     const PRICING = {
       monthly: {
         200: { price: '500 €', sub: 'Sans engagement (ou 450 €/mois engagé à l\'année)' },
@@ -769,13 +771,14 @@
       const selectEl = document.getElementById('tenant-plan');
       if (selectEl) selectEl.value = String(planUsers);
 
-      if (currentUser && token) {
+      if (currentUser) {
         switchView('client');
       } else {
         openAuthModal('register');
       }
     }
 
+    // Menu Paramètres (Bascule rapide entre les comptes)
     function toggleDevMenu() {
       const menu = document.getElementById('dev-menu');
       menu.classList.toggle('hidden');
@@ -881,6 +884,7 @@
       }
     }
 
+    // Authentification Modale
     function openAuthModal(mode) {
       authMode = mode;
       document.getElementById('auth-modal').classList.remove('hidden');
@@ -929,6 +933,7 @@
       }
     }
 
+    // Contact Commercial (>1000 users)
     function openContactModal() {
       document.getElementById('contact-success').classList.add('hidden');
       document.getElementById('contact-modal').classList.remove('hidden');
@@ -944,6 +949,7 @@
       setTimeout(() => closeContactModal(), 1800);
     }
 
+    // Gestion des établissements côté Client
     async function loadMyTenants() {
       const container = document.getElementById('client-tenants-list');
       try {
@@ -965,12 +971,14 @@
 
     function getTenantTargetUrl(t, type = 'primary') {
       if (!t) return '#';
+      const proto = window.location.protocol;
       const host = window.location.hostname;
       const directPort = t.direct_port || (8100 + (t.id || 1));
       const slug = t.slug;
 
       const directHost = (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost')) ? 'localhost' : host;
       const directUrl = `http://${directHost}:${directPort}`;
+      // Les sous-domaines *.edupulse.mnbll.fr sont servis en HTTP sur le port 80 (évite ERR_SSL_PROTOCOL_ERROR sur wildcard)
       const domainUrl = `http://${slug}.edupulse.mnbll.fr`;
       const localPort = window.location.port === '8000' ? ':8000' : '';
       const localSubdomainUrl = `http://${slug}.localhost${localPort}`;
@@ -979,15 +987,23 @@
       if (type === 'domain') return domainUrl;
       if (type === 'local') return localSubdomainUrl;
 
+      // Résolution intelligente selon le contexte de navigation :
+      // 1. Accès via le nom de domaine de production edupulse.mnbll.fr ou sous-domaine
       if (host.includes('edupulse.mnbll.fr') || host.endsWith('.mnbll.fr')) {
         return domainUrl;
       }
+
+      // 2. Accès en développement local via Traefik (port 80 ou 8000)
       if ((host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost')) && (window.location.port === '' || window.location.port === '80' || window.location.port === '8000')) {
         return localSubdomainUrl;
       }
+
+      // 3. Accès en développement local via port direct (8001) ou direct IP
       if (host === 'localhost' || host === '127.0.0.1' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
         return directUrl;
       }
+
+      // 4. Par défaut : nom de domaine officiel sans port
       return domainUrl;
     }
 
@@ -1002,6 +1018,12 @@
         `;
         return;
       }
+
+      const planNames = {
+        200: 'Formule Essentiel (200 utilisateurs max)',
+        500: 'Formule Campus (500 utilisateurs max)',
+        1000: 'Formule Académie (1 000 utilisateurs max)'
+      };
 
       container.innerHTML = tenants.map(t => {
         const isActive = t.status === 'RUNNING';
@@ -1120,6 +1142,7 @@
       }
     }
 
+    // Super-Admin Global
     async function refreshSuperAdmin() {
       try {
         const [vmRes, tenantsRes, usersRes] = await Promise.all([
@@ -1147,6 +1170,7 @@
           document.getElementById('metric-disk').textContent = `${vm.disk_used_gb} / ${vm.disk_total_gb} Go`;
           document.getElementById('bar-disk').style.width = `${Math.min(vm.disk_percent, 100)}%`;
 
+          // Statut du cluster Docker Swarm
           if (vm.swarm) {
             const swarmBadge = document.getElementById('swarm-status-badge');
             const btnInitSwarm = document.getElementById('btn-init-swarm');
@@ -1154,7 +1178,7 @@
             const repSub = document.getElementById('metric-replicas-sub');
 
             if (vm.swarm.swarm_active) {
-              swarmBadge.textContent = `● Cluster Swarm Actif (${vm.swarm.nodes_count} noeud(s))`;
+              swarmBadge.textContent = `● Cluster Swarm Actif (${vm.swarm.nodes_count} noeud(s) Manager)`;
               swarmBadge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
               if (btnInitSwarm) btnInitSwarm.classList.add('hidden');
             } else {
@@ -1190,6 +1214,7 @@
             }
           }
 
+          // Journal d'orchestration (Elasticity / Scalability / Agility)
           const eventsContainer = document.getElementById('sa-cloud-events');
           if (eventsContainer && Array.isArray(vm.events) && vm.events.length > 0) {
             const pillarColors = {

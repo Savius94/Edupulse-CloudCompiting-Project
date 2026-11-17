@@ -68,12 +68,7 @@ TENANT_IMAGE_BUILT = False
 # =============================================================================
 # 2. INITIALISATION BASE DE DONNÉES SQL (PORTAL-DB)
 # =============================================================================
-if DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
-elif DATABASE_URL.startswith("postgresql"):
-    connect_args = {"connect_timeout": 3}
-else:
-    connect_args = {}
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -305,29 +300,20 @@ class SimulateLoadRequest(BaseModel):
 # =============================================================================
 # 5. ORCHESTRATEUR DOCKER SWARM & DOCKER COMPOSE (SCALABILITY, ELASTICITY, AGILITY)
 # =============================================================================
-_SWARM_ACTIVE_CACHE: Dict[str, Any] = {"value": None, "expires_at": 0.0}
-
-
 def is_swarm_active() -> bool:
-    """Détecte si le démon Docker hôte est actuellement un noeud Docker Swarm actif (avec cache 30s)."""
+    """Détecte si le démon Docker hôte est actuellement un noeud Docker Swarm actif."""
     if ORCHESTRATOR_MODE == "compose":
         return False
-    now = time.time()
-    if _SWARM_ACTIVE_CACHE["value"] is not None and now < _SWARM_ACTIVE_CACHE["expires_at"]:
-        return bool(_SWARM_ACTIVE_CACHE["value"])
     try:
         res = subprocess.run(
             ["docker", "info", "--format", "{{.Swarm.LocalNodeState}}"],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=5,
         )
-        val = res.returncode == 0 and res.stdout.strip().lower() == "active"
+        return res.returncode == 0 and res.stdout.strip().lower() == "active"
     except Exception:
-        val = False
-    _SWARM_ACTIVE_CACHE["value"] = val
-    _SWARM_ACTIVE_CACHE["expires_at"] = now + 30.0
-    return val
+        return False
 
 
 def get_swarm_cluster_details() -> Dict[str, Any]:
@@ -340,11 +326,25 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
 
     if swarm_active:
         try:
+            n_res = subprocess.run(
+                ["docker", "info", "--format", "{{.Swarm.Nodes}}|{{.Swarm.Managers}}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if n_res.returncode == 0 and "|" in n_res.stdout:
+                parts = n_res.stdout.strip().split("|")
+                nodes_count = int(parts[0] or 1)
+                managers_count = int(parts[1] or 1)
+        except Exception:
+            pass
+
+        try:
             nls_res = subprocess.run(
                 ["docker", "node", "ls", "--format", "{{.Hostname}}|{{.Status}}|{{.Availability}}|{{.ManagerStatus}}"],
                 capture_output=True,
                 text=True,
-                timeout=3,
+                timeout=5,
             )
             if nls_res.returncode == 0:
                 for line in nls_res.stdout.strip().splitlines():
@@ -356,9 +356,6 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
                             "availability": av.strip(),
                             "role": "Manager" if mgr.strip() else "Worker",
                         })
-                if nodes_list:
-                    nodes_count = len(nodes_list)
-                    managers_count = sum(1 for n in nodes_list if n["role"] == "Manager") or 1
         except Exception:
             pass
 
@@ -367,7 +364,7 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
                 ["docker", "service", "ls", "-q"],
                 capture_output=True,
                 text=True,
-                timeout=3,
+                timeout=5,
             )
             if s_res.returncode == 0:
                 lines = [l for l in s_res.stdout.strip().splitlines() if l.strip()]
@@ -734,70 +731,63 @@ def healthcheck():
 
 @app.on_event("startup")
 def on_startup():
-    # Attente résiliente de PostgreSQL (max 15s)
-    for attempt in range(10):
+    # Attente résiliente de PostgreSQL (indispensable en mode Docker Swarm)
+    for attempt in range(20):
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             break
-        except Exception as err:
-            print(f"[portal-api] Attente portal-db ({attempt + 1}/10) : {err}", flush=True)
-            if attempt == 9:
-                return
+        except Exception:
+            if attempt == 19:
+                raise
             time.sleep(1.5)
 
-    try:
-        Base.metadata.create_all(bind=engine)
-        with engine.connect() as conn:
-            existing_cols = {
-                r[0]
-                for r in conn.execute(
-                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'tenant_stacks'")
-                ).fetchall()
-            }
-            if "replicas" not in existing_cols:
-                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
-            if "min_replicas" not in existing_cols:
-                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
-            if "max_replicas" not in existing_cols:
-                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
-            if "autoscale_enabled" not in existing_cols:
-                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
-            if "orchestrator" not in existing_cols:
-                conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
-            conn.commit()
-    except Exception as err:
-        print(f"[portal-api] Migration SQL warning : {err}", flush=True)
+    # Verrou consultatif PostgreSQL pour éviter les conflits quand 2 réplicas portal-api démarrent ensemble
+    with engine.connect() as lock_conn:
+        lock_conn.execute(text("SELECT pg_advisory_lock(101010);"))
+        try:
+            Base.metadata.create_all(bind=engine)
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
+                    conn.commit()
+            except Exception:
+                pass
 
-    db = SessionLocal()
-    try:
-        super_admin = (
-            db.query(PortalUser)
-            .filter(PortalUser.email == SUPERADMIN_EMAIL.lower())
-            .first()
-        )
-        if not super_admin:
-            super_admin = PortalUser(
-                email=SUPERADMIN_EMAIL.lower(),
-                full_name=SUPERADMIN_NAME,
-                password_hash=hash_password(SUPERADMIN_PASSWORD),
-                role="SUPER_ADMIN",
-            )
-            db.add(super_admin)
-        else:
-            super_admin.password_hash = hash_password(SUPERADMIN_PASSWORD)
-            super_admin.role = "SUPER_ADMIN"
-        db.commit()
-        record_cloud_event(
-            "SWARM",
-            "portal-api",
-            f"Réplica {socket.gethostname()} prêt.",
-            db=db,
-        )
-    except Exception as err:
-        print(f"[portal-api] Init SuperAdmin warning : {err}", flush=True)
-    finally:
-        db.close()
+            db = SessionLocal()
+            try:
+                super_admin = (
+                    db.query(PortalUser)
+                    .filter(PortalUser.email == SUPERADMIN_EMAIL.lower())
+                    .first()
+                )
+                if not super_admin:
+                    super_admin = PortalUser(
+                        email=SUPERADMIN_EMAIL.lower(),
+                        full_name=SUPERADMIN_NAME,
+                        password_hash=hash_password(SUPERADMIN_PASSWORD),
+                        role="SUPER_ADMIN",
+                    )
+                    db.add(super_admin)
+                else:
+                    super_admin.password_hash = hash_password(SUPERADMIN_PASSWORD)
+                    super_admin.role = "SUPER_ADMIN"
+                db.commit()
+                swarm_state = "Docker Swarm Actif" if is_swarm_active() else "Mode Hybride Swarm/Compose Prêt"
+                record_cloud_event(
+                    "SWARM",
+                    "portal-api",
+                    f"Réplica {socket.gethostname()} démarré ({swarm_state}).",
+                    db=db,
+                )
+            finally:
+                db.close()
+        finally:
+            lock_conn.execute(text("SELECT pg_advisory_unlock(101010);"))
 
 
 # =============================================================================
@@ -1548,10 +1538,6 @@ STATIC_DIR = BASE_DIR / "static"
 
 
 @app.get("/", include_in_schema=False)
-@app.get("/espace-client", include_in_schema=False)
-@app.get("/client", include_in_schema=False)
-@app.get("/superadmin", include_in_schema=False)
-@app.get("/admin", include_in_schema=False)
 def serve_portal_ui():
     return FileResponse(STATIC_DIR / "index.html")
 
