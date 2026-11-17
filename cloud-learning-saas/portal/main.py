@@ -68,7 +68,12 @@ TENANT_IMAGE_BUILT = False
 # =============================================================================
 # 2. INITIALISATION BASE DE DONNÉES SQL (PORTAL-DB)
 # =============================================================================
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+elif DATABASE_URL.startswith("postgresql"):
+    connect_args = {"connect_timeout": 3}
+else:
+    connect_args = {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -731,63 +736,59 @@ def healthcheck():
 
 @app.on_event("startup")
 def on_startup():
-    # Attente résiliente de PostgreSQL (indispensable en mode Docker Swarm)
-    for attempt in range(20):
+    # Attente résiliente de PostgreSQL (max 15s)
+    for attempt in range(10):
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             break
-        except Exception:
-            if attempt == 19:
-                raise
+        except Exception as err:
+            print(f"[portal-api] Attente portal-db ({attempt + 1}/10) : {err}", flush=True)
+            if attempt == 9:
+                return
             time.sleep(1.5)
 
-    # Verrou consultatif PostgreSQL pour éviter les conflits quand 2 réplicas portal-api démarrent ensemble
-    with engine.connect() as lock_conn:
-        lock_conn.execute(text("SELECT pg_advisory_lock(101010);"))
-        try:
-            Base.metadata.create_all(bind=engine)
-            try:
-                with engine.connect() as conn:
-                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
-                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
-                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
-                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
-                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
-                    conn.commit()
-            except Exception:
-                pass
+    try:
+        Base.metadata.create_all(bind=engine)
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
+            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
+            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
+            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
+            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
+            conn.commit()
+    except Exception as err:
+        print(f"[portal-api] Migration SQL warning : {err}", flush=True)
 
-            db = SessionLocal()
-            try:
-                super_admin = (
-                    db.query(PortalUser)
-                    .filter(PortalUser.email == SUPERADMIN_EMAIL.lower())
-                    .first()
-                )
-                if not super_admin:
-                    super_admin = PortalUser(
-                        email=SUPERADMIN_EMAIL.lower(),
-                        full_name=SUPERADMIN_NAME,
-                        password_hash=hash_password(SUPERADMIN_PASSWORD),
-                        role="SUPER_ADMIN",
-                    )
-                    db.add(super_admin)
-                else:
-                    super_admin.password_hash = hash_password(SUPERADMIN_PASSWORD)
-                    super_admin.role = "SUPER_ADMIN"
-                db.commit()
-                swarm_state = "Docker Swarm Actif" if is_swarm_active() else "Mode Hybride Swarm/Compose Prêt"
-                record_cloud_event(
-                    "SWARM",
-                    "portal-api",
-                    f"Réplica {socket.gethostname()} démarré ({swarm_state}).",
-                    db=db,
-                )
-            finally:
-                db.close()
-        finally:
-            lock_conn.execute(text("SELECT pg_advisory_unlock(101010);"))
+    db = SessionLocal()
+    try:
+        super_admin = (
+            db.query(PortalUser)
+            .filter(PortalUser.email == SUPERADMIN_EMAIL.lower())
+            .first()
+        )
+        if not super_admin:
+            super_admin = PortalUser(
+                email=SUPERADMIN_EMAIL.lower(),
+                full_name=SUPERADMIN_NAME,
+                password_hash=hash_password(SUPERADMIN_PASSWORD),
+                role="SUPER_ADMIN",
+            )
+            db.add(super_admin)
+        else:
+            super_admin.password_hash = hash_password(SUPERADMIN_PASSWORD)
+            super_admin.role = "SUPER_ADMIN"
+        db.commit()
+        record_cloud_event(
+            "SWARM",
+            "portal-api",
+            f"Réplica {socket.gethostname()} prêt.",
+            db=db,
+        )
+    except Exception as err:
+        print(f"[portal-api] Init SuperAdmin warning : {err}", flush=True)
+    finally:
+        db.close()
 
 
 # =============================================================================
