@@ -210,46 +210,58 @@ Sur le VPS ET sur chacune des 3 VMs (VM1, VM2, VM3) :
    (Exemple : VPS = 100.100.1.10 | VM1 = 100.100.1.1 | VM2 = 100.100.1.2 | VM3 = 100.100.1.3)
 
 -----------------------------------------------------------------------------
-ÉTAPE 3 : Monter le Cluster Docker Swarm sur les 3 VMs (PC Maison)
+ÉTAPE 3 : Configurer le Registry privé & Déployer le Cluster Swarm
 -----------------------------------------------------------------------------
-1. Sur VM1 (Noeud Manager principal) :
-   a) Initialiser le cluster Swarm sur l'interface Tailscale (ou LAN local) :
-      docker swarm init --advertise-addr <IP_TAILSCALE_VM1>
-      (Cette commande affiche une commande `docker swarm join --token SWMTKN-1-... <IP_TAILSCALE_VM1>:2377`, copiez-la !)
+Architecture des noeuds :
+- Swarm-Manager (100.85.14.115) : Registry (:5000) + docker-socket-proxy + BDDs (0 app web)
+- Swarm-VM1     (100.71.91.21)  : Worker 1 (Traefik :80 + portal-api + tenant-app)
+- Swarm-VM2     (100.83.159.51) : Worker 2 (Traefik :80 + portal-api + tenant-app)
 
-2. Sur VM2 et VM3 (Noeuds Workers) :
-   a) Coller la commande `docker swarm join` obtenue à l'étape précédente :
-      docker swarm join --token SWMTKN-1-xxxx <IP_TAILSCALE_VM1>:2377
+1. Sur les 3 VMs (Swarm-Manager, Swarm-VM1, Swarm-VM2) — À faire UNE SEULE FOIS :
+   Autoriser le registre Docker privé HTTP sur le Manager (100.85.14.115:5000) :
+   sudo mkdir -p /etc/docker
+   echo '{"insecure-registries": ["100.85.14.115:5000"]}' | sudo tee /etc/docker/daemon.json
+   sudo systemctl restart docker
 
-3. Cloner le projet et construire l'image d'établissement sur les 3 VMs (VM1, VM2, VM3) :
-   (Important pour que Docker Swarm puisse placer des réplicas d'écoles sur VM2 et VM3 instantanément)
-   git clone https://github.com/Savius94/Edupulse-CloudCompiting-Project.git
-   cd Edupulse-CloudCompiting-Project/cloud-learning-saas
-   docker build -t edupulse-tenant-app:latest ./tenant-stack
+2. Sur Swarm-Manager UNIQUEMENT (tout se gère depuis le Manager, ne plus toucher aux Workers) :
+   a) Si l'ancien stack Compose tournait encore, l'arrêter proprement :
+      cd ~/Edupulse-CloudCompiting-Project/cloud-learning-saas
+      docker compose down
 
-4. Sur VM1 uniquement (Manager), lancer le Control Plane :
-   cd ~/Edupulse-CloudCompiting-Project/cloud-learning-saas
-   docker compose up -d --build
+   b) Mettre à jour le code et lancer le déploiement complet en 1 commande :
+      git pull origin main
+      chmod +x deploy-swarm.sh
+      ./deploy-swarm.sh
 
-5. Vérifier depuis VM1 que les 3 VMs sont bien "Ready" dans le cluster Swarm :
-   docker node ls
+   c) Vérifier le placement des services (0 app web sur Swarm-Manager, 2 réplicas sur Workers) :
+      docker service ls
+      docker stack ps edupulse
 
 -----------------------------------------------------------------------------
 ÉTAPE 4 : Configurer le conteneur Caddy sur le VPS Relais
 -----------------------------------------------------------------------------
-1. Sur votre VPS, le conteneur Caddy doit pouvoir joindre l'IP Tailscale de VM1 (100.x.y.1) :
-   - Si Caddy tourne en `network_mode: host` (ou directement sur le VPS), il voit nativement `100.x.y.1`.
-   - Dans votre `Caddyfile` sur le VPS (voir `cloud-learning-saas/Caddyfile.vps.example`), ajoutez :
-
-   http://edupulse.mnbll.fr, http://*.edupulse.mnbll.fr {
-       reverse_proxy http://<IP_TAILSCALE_VM1>:80 http://<IP_TAILSCALE_VM2>:80 http://<IP_TAILSCALE_VM3>:80 {
+1. Caddy pointe UNIQUEMENT sur les 2 Workers (Swarm-VM1 et Swarm-VM2) :
+   edupulse.mnbll.fr {
+       reverse_proxy 100.71.91.21:80 100.83.159.51:80 {
            lb_policy round_robin
-           fail_duration 10s
+           fail_duration 5s
            header_up Host {host}
+           header_up X-Real-IP {remote_host}
+           header_up X-Forwarded-For {remote_host}
+           header_up X-Forwarded-Proto {scheme}
        }
    }
 
-   (Ou avec HTTPS On-Demand TLS — voir les détails dans `cloud-learning-saas/Caddyfile.vps.example`).
+   http://*.edupulse.mnbll.fr {
+       reverse_proxy 100.71.91.21:80 100.83.159.51:80 {
+           lb_policy round_robin
+           fail_duration 5s
+           header_up Host {host}
+           header_up X-Real-IP {remote_host}
+           header_up X-Forwarded-For {remote_host}
+           header_up X-Forwarded-Proto {scheme}
+       }
+   }
 
 2. Recharger Caddy sur le VPS :
    docker exec -it <nom-conteneur-caddy> caddy reload --config /etc/caddy/Caddyfile
