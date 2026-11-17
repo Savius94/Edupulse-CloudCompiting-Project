@@ -497,9 +497,12 @@
           </div>
         </div>
 
+        <!-- État en direct des noeuds du cluster Swarm -->
+        <div id="swarm-nodes-grid" class="grid grid-cols-1 sm:grid-cols-3 gap-3"></div>
+
         <!-- Journal des événements d'orchestration Swarm / Auto-Scaling -->
         <div class="bg-slate-950/80 rounded-xl p-4 border border-slate-800">
-          <div class="flex items-center justify-between mb-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
             <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Journal d'Orchestration Temps Réel (Swarm / Auto-Scaler)</span>
             <span id="swarm-nodes-summary" class="text-[11px] font-mono text-slate-400">Noeuds: 1 | Services: --</span>
           </div>
@@ -1138,7 +1141,27 @@
               if (btnInitSwarm) btnInitSwarm.classList.remove('hidden');
             }
             if (nodesSummary) {
-              nodesSummary.textContent = `Mode: ${vm.swarm.orchestrator_mode} | Noeuds: ${vm.swarm.nodes_count} | Services Swarm: ${vm.swarm.swarm_services_count} | Total Réplicas: ${vm.total_replicas || 0}`;
+              const repHost = vm.swarm.served_by_replica ? ` | Servi par: ${vm.swarm.served_by_replica}` : '';
+              nodesSummary.textContent = `Mode: ${vm.swarm.orchestrator_mode} | Noeuds: ${vm.swarm.nodes_count} | Services Swarm: ${vm.swarm.swarm_services_count} | Total Réplicas: ${vm.total_replicas || 0}${repHost}`;
+            }
+            const nodesGrid = document.getElementById('swarm-nodes-grid');
+            if (nodesGrid && Array.isArray(vm.swarm.nodes) && vm.swarm.nodes.length > 0) {
+              nodesGrid.innerHTML = vm.swarm.nodes.map(n => {
+                const isReady = (n.status || '').toLowerCase() === 'ready';
+                const isMgr = n.role === 'Manager';
+                return `
+                  <div class="p-3 rounded-xl bg-slate-800/80 border ${isReady ? 'border-slate-700' : 'border-rose-500/50'} flex items-center justify-between gap-2">
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full ${isReady ? 'bg-emerald-400' : 'bg-rose-500'}"></span>
+                        <span class="text-xs font-bold text-white">${n.hostname}</span>
+                      </div>
+                      <p class="text-[11px] text-slate-400 mt-0.5">${isMgr ? 'Manager (Registry + Proxy + BDD)' : 'Worker (Apps + Traefik)'}</p>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${isReady ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}">${n.status}</span>
+                  </div>
+                `;
+              }).join('');
             }
             if (repSub) {
               repSub.textContent = `${vm.total_replicas || 0} réplica(s) en ligne (${vm.swarm.orchestrator_mode})`;

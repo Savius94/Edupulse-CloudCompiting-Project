@@ -1,9 +1,13 @@
 # =============================================================================
 # CONFIGURATION CADDY SUR LE VPS RELAIS (AVEC TAILSCALE)
 # =============================================================================
-# Important : Caddy doit pointer UNIQUEMENT vers l'IP Tailscale de VM1 (100.85.14.115:80),
-# car c'est sur VM1 que tourne le routeur d'entrée Traefik.
-# C'est ensuite Traefik qui répartit la charge sur le réseau Swarm `saas-public-net`.
+# Architecture Haute Disponibilité (Workers uniquement) :
+# - Swarm-Manager (100.85.14.115) : Registry + Docker Socket Proxy + BDDs (0 app web)
+# - Swarm-VM1     (100.71.91.21)  : Worker 1 (Traefik :80 + portal-api + tenant-app)
+# - Swarm-VM2     (100.83.159.51) : Worker 2 (Traefik :80 + portal-api + tenant-app)
+#
+# Caddy pointe UNIQUEMENT sur les 2 Workers (100.71.91.21 et 100.83.159.51).
+# Si l'un des 2 Workers tombe, Caddy bascule immédiatement tout le trafic sur l'autre !
 
 # 1. Votre application existante
 mnbll.fr {
@@ -12,7 +16,9 @@ mnbll.fr {
 
 # 2. EduPulse Portail Principal (HTTPS Let's Encrypt automatique)
 edupulse.mnbll.fr {
-    reverse_proxy 100.85.14.115:80 {
+    reverse_proxy 100.71.91.21:80 100.83.159.51:80 {
+        lb_policy round_robin
+        fail_duration 5s
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
@@ -22,7 +28,9 @@ edupulse.mnbll.fr {
 
 # 3. Sous-domaines des Établissements (*.edupulse.mnbll.fr en HTTP sur le port 80)
 http://*.edupulse.mnbll.fr {
-    reverse_proxy 100.85.14.115:80 {
+    reverse_proxy 100.71.91.21:80 100.83.159.51:80 {
+        lb_policy round_robin
+        fail_duration 5s
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}

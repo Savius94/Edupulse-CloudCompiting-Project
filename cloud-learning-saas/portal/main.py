@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import socket
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, ForeignKey, func, text
+    create_engine, Column, Integer, String, Float, DateTime, ForeignKey, func, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 
@@ -36,6 +37,11 @@ TENANT_COMPOSE_PATH = os.getenv(
     "TENANT_COMPOSE_PATH", "/app/tenant-stack/docker-compose.tenant.yml"
 )
 ORCHESTRATOR_MODE = os.getenv("ORCHESTRATOR_MODE", "auto").lower()
+REGISTRY_HOST = os.getenv("REGISTRY_HOST", "").strip()
+TENANT_IMAGE = os.getenv(
+    "TENANT_IMAGE",
+    f"{REGISTRY_HOST}/edupulse-tenant-app:latest" if REGISTRY_HOST else "edupulse-tenant-app:latest",
+).strip()
 
 ALLOWED_PLANS = {
     200: "Formule Essentiel (200 utilisateurs max)",
@@ -43,32 +49,17 @@ ALLOWED_PLANS = {
     1000: "Formule Académie (1 000 utilisateurs max)",
 }
 
-# Configuration Scalabilité & Élasticité par plan d'abonnement
+# Configuration Scalabilité & Élasticité calibrée pour VMs 2 Go RAM / 1 vCPU
+# Chaque établissement démarre avec >= 2 réplicas (répartis sur Swarm-VM1 & Swarm-VM2)
 PLAN_SCALING_RULES = {
-    200: {"initial_replicas": 1, "min_replicas": 1, "max_replicas": 3, "cpu_limit": "0.50", "mem_limit": "512M"},
-    500: {"initial_replicas": 2, "min_replicas": 1, "max_replicas": 5, "cpu_limit": "0.75", "mem_limit": "768M"},
-    1000: {"initial_replicas": 3, "min_replicas": 2, "max_replicas": 8, "cpu_limit": "1.00", "mem_limit": "1024M"},
+    200: {"initial_replicas": 2, "min_replicas": 1, "max_replicas": 4, "cpu_res": "0.05", "mem_res": "64M", "cpu_limit": "0.40", "mem_limit": "256M"},
+    500: {"initial_replicas": 2, "min_replicas": 1, "max_replicas": 6, "cpu_res": "0.05", "mem_res": "64M", "cpu_limit": "0.45", "mem_limit": "256M"},
+    1000: {"initial_replicas": 3, "min_replicas": 2, "max_replicas": 8, "cpu_res": "0.08", "mem_res": "64M", "cpu_limit": "0.50", "mem_limit": "320M"},
 }
 
 AUTOSCALE_CPU_HIGH = 70.0
 AUTOSCALE_CPU_LOW = 30.0
-SIMULATED_CPU_OVERRIDE: Optional[float] = None
-ELASTICITY_EVENTS: List[Dict[str, Any]] = []
 TENANT_IMAGE_BUILT = False
-
-
-def record_cloud_event(pillar: str, slug: str, message: str, cpu_pct: Optional[float] = None):
-    """Enregistre un événement d'orchestration Swarm (Elasticity, Scalability, Agility)."""
-    event = {
-        "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
-        "pillar": pillar.upper(),  # ELASTICITY, SCALABILITY, AGILITY, SWARM
-        "slug": slug,
-        "message": message,
-        "cpu_percent": round(cpu_pct, 1) if cpu_pct is not None else None,
-    }
-    ELASTICITY_EVENTS.insert(0, event)
-    if len(ELASTICITY_EVENTS) > 40:
-        ELASTICITY_EVENTS.pop()
 
 
 # =============================================================================
@@ -104,15 +95,114 @@ class TenantStack(Base):
     domain = Column(String(255), unique=True, nullable=False)
     plan_max_users = Column(Integer, nullable=False, default=200)
     status = Column(String(50), nullable=False, default="RUNNING")
-    replicas = Column(Integer, nullable=False, default=1)
+    replicas = Column(Integer, nullable=False, default=2)
     min_replicas = Column(Integer, nullable=False, default=1)
-    max_replicas = Column(Integer, nullable=False, default=3)
+    max_replicas = Column(Integer, nullable=False, default=4)
     autoscale_enabled = Column(Integer, nullable=False, default=1)
     orchestrator = Column(String(30), nullable=False, default="SWARM")
     owner_id = Column(Integer, ForeignKey("portal_users.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("PortalUser", back_populates="tenants")
+
+
+class CloudSetting(Base):
+    """Paramètres partagés du cluster (stockés en BDD pour cohérence entre tous les réplicas portal-api)."""
+    __tablename__ = "cloud_settings"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(String(255), nullable=True)
+
+
+class CloudEventLog(Base):
+    """Journal d'orchestration Swarm partagé entre tous les réplicas portal-api."""
+    __tablename__ = "cloud_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(String(20), nullable=False)
+    pillar = Column(String(30), nullable=False)
+    slug = Column(String(63), nullable=False)
+    message = Column(String(500), nullable=False)
+    cpu_percent = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+def get_simulated_cpu_override(db: Optional[Session] = None) -> Optional[float]:
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        row = db.query(CloudSetting).filter(CloudSetting.key == "simulated_cpu_override").first()
+        if row and row.value is not None and row.value != "":
+            return float(row.value)
+        return None
+    except Exception:
+        return None
+    finally:
+        if close_db:
+            db.close()
+
+
+def set_simulated_cpu_override(cpu_val: Optional[float], db: Optional[Session] = None):
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        row = db.query(CloudSetting).filter(CloudSetting.key == "simulated_cpu_override").first()
+        str_val = str(cpu_val) if cpu_val is not None else ""
+        if not row:
+            row = CloudSetting(key="simulated_cpu_override", value=str_val)
+            db.add(row)
+        else:
+            row.value = str_val
+        db.commit()
+    except Exception:
+        pass
+    finally:
+        if close_db:
+            db.close()
+
+
+def record_cloud_event(pillar: str, slug: str, message: str, cpu_pct: Optional[float] = None, db: Optional[Session] = None):
+    """Enregistre un événement d'orchestration Swarm en base de données (partagé entre réplicas)."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        ev = CloudEventLog(
+            timestamp=datetime.utcnow().strftime("%H:%M:%S"),
+            pillar=pillar.upper(),
+            slug=slug,
+            message=message[:490],
+            cpu_percent=round(cpu_pct, 1) if cpu_pct is not None else None,
+        )
+        db.add(ev)
+        db.commit()
+    except Exception:
+        pass
+    finally:
+        if close_db:
+            db.close()
+
+
+def get_recent_cloud_events(db: Session, limit: int = 15) -> List[Dict[str, Any]]:
+    try:
+        rows = db.query(CloudEventLog).order_by(CloudEventLog.id.desc()).limit(limit).all()
+        return [
+            {
+                "timestamp": r.timestamp,
+                "pillar": r.pillar,
+                "slug": r.slug,
+                "message": r.message,
+                "cpu_percent": r.cpu_percent,
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
 
 
 # =============================================================================
@@ -220,11 +310,12 @@ def is_swarm_active() -> bool:
 
 
 def get_swarm_cluster_details() -> Dict[str, Any]:
-    """Récupère les métriques temps réel du cluster Docker Swarm."""
+    """Récupère les métriques temps réel du cluster Docker Swarm et la liste des noeuds."""
     swarm_active = is_swarm_active()
     nodes_count = 1
     managers_count = 1
     swarm_services_count = 0
+    nodes_list: List[Dict[str, str]] = []
 
     if swarm_active:
         try:
@@ -238,6 +329,26 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
                 parts = n_res.stdout.strip().split("|")
                 nodes_count = int(parts[0] or 1)
                 managers_count = int(parts[1] or 1)
+        except Exception:
+            pass
+
+        try:
+            nls_res = subprocess.run(
+                ["docker", "node", "ls", "--format", "{{.Hostname}}|{{.Status}}|{{.Availability}}|{{.ManagerStatus}}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if nls_res.returncode == 0:
+                for line in nls_res.stdout.strip().splitlines():
+                    if "|" in line:
+                        h, st, av, mgr = line.split("|", 3)
+                        nodes_list.append({
+                            "hostname": h.strip(),
+                            "status": st.strip(),
+                            "availability": av.strip(),
+                            "role": "Manager" if mgr.strip() else "Worker",
+                        })
         except Exception:
             pass
 
@@ -260,18 +371,23 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
         "nodes_count": nodes_count,
         "managers_count": managers_count,
         "swarm_services_count": swarm_services_count,
+        "nodes": nodes_list,
+        "served_by_replica": socket.gethostname(),
     }
 
 
 def ensure_tenant_image_built(context_dir: Path, env: dict, force_rebuild: bool = False):
     """
-    En mode Docker Swarm (`docker stack deploy`), l'image `edupulse-tenant-app:latest`
-    doit être présente sur le noeud avant le déploiement du stack.
+    Si un Registry centralisé est configuré (ou si portal-api tourne sur un Worker via tcp://docker-socket-proxy),
+    les Workers téléchargent directement l'image depuis le Registry du Manager sans build local.
     """
+    if REGISTRY_HOST or os.getenv("DOCKER_HOST", "").startswith("tcp://"):
+        return
+
     global TENANT_IMAGE_BUILT
     if TENANT_IMAGE_BUILT and not force_rebuild:
         check = subprocess.run(
-            ["docker", "image", "inspect", "edupulse-tenant-app:latest"],
+            ["docker", "image", "inspect", TENANT_IMAGE],
             capture_output=True,
             text=True,
             timeout=10,
@@ -279,7 +395,7 @@ def ensure_tenant_image_built(context_dir: Path, env: dict, force_rebuild: bool 
         if check.returncode == 0:
             return
 
-    build_cmd = ["docker", "build", "-t", "edupulse-tenant-app:latest"]
+    build_cmd = ["docker", "build", "-t", TENANT_IMAGE]
     for proxy_key in ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]:
         if env.get(proxy_key):
             build_cmd.extend(["--build-arg", f"{proxy_key}={env[proxy_key]}"])
@@ -352,6 +468,7 @@ def orchestrate_tenant_stack(
     env.update(
         {
             "TENANT_SLUG": slug,
+            "TENANT_IMAGE": TENANT_IMAGE,
             "INSTITUTION_NAME": institution_name,
             "MAX_USERS": str(plan_max_users),
             "BASE_DOMAIN": BASE_DOMAIN,
@@ -361,6 +478,8 @@ def orchestrate_tenant_stack(
             "ADMIN_PASSWORD_HASH": admin_password_hash,
             "ADMIN_FULL_NAME": admin_name,
             "REPLICAS": str(target_replicas),
+            "CPU_RES": rules["cpu_res"],
+            "MEM_RES": rules["mem_res"],
             "CPU_LIMIT": rules["cpu_limit"],
             "MEM_LIMIT": rules["mem_limit"],
             "TENANT_NET_DRIVER": "overlay" if swarm_mode else "bridge",
@@ -384,6 +503,8 @@ def orchestrate_tenant_stack(
         safe_hash = (admin_password_hash or "").replace("$", "$$")
         rendered_yaml = (
             raw_yaml
+            .replace("${TENANT_IMAGE:-100.85.14.115:5000/edupulse-tenant-app:latest}", TENANT_IMAGE)
+            .replace("${REPLICAS:-2}", str(int(target_replicas)))
             .replace("${REPLICAS:-1}", str(int(target_replicas)))
             .replace("${TENANT_SLUG}", slug)
             .replace("${INSTITUTION_NAME}", institution_name.replace('"', '\\"'))
@@ -402,6 +523,10 @@ def orchestrate_tenant_stack(
             .replace("${no_proxy:-}", env.get("no_proxy", ""))
             .replace("${TENANT_PORT:-8101}", str(direct_port))
             .replace("${BASE_DOMAIN:-edupulse.mnbll.fr}", BASE_DOMAIN)
+            .replace("${CPU_RES:-0.05}", rules["cpu_res"])
+            .replace("${MEM_RES:-64M}", rules["mem_res"])
+            .replace("${CPU_LIMIT:-0.40}", rules["cpu_limit"])
+            .replace("${MEM_LIMIT:-256M}", rules["mem_limit"])
             .replace("${CPU_LIMIT:-0.50}", rules["cpu_limit"])
             .replace("${MEM_LIMIT:-512M}", rules["mem_limit"])
             .replace("${TENANT_NET_DRIVER:-overlay}", "overlay")
@@ -414,20 +539,15 @@ def orchestrate_tenant_stack(
 
         if action == "up":
             ensure_tenant_image_built(compose_path.parent, env)
-            cmd = ["docker", "stack", "deploy", "-c", str(rendered_stack_path), slug]
+            cmd = ["docker", "stack", "deploy", "--resolve-image=never", "-c", str(rendered_stack_path), slug]
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             if res.returncode == 0:
-                record_cloud_event("AGILITY", slug, f"Déploiement Stack Swarm '{slug}' ({target_replicas} réplica(s), overlay net).")
+                record_cloud_event("AGILITY", slug, f"Déploiement Stack Swarm '{slug}' ({target_replicas} réplica(s) répartis sur les Workers).")
                 return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
-            # Fallback automatique vers Docker Compose si docker stack deploy rencontre un blocage
-            fallback_up = ["docker", "compose", "-p", slug, "-f", str(compose_path), "up", "-d", "--build"]
-            res_fb = subprocess.run(fallback_up, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
-            if res_fb.returncode != 0:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Erreur déploiement Docker : {res.stderr or res_fb.stderr}",
-                )
-            return {"executed": True, "mode": "COMPOSE_FALLBACK", "command": " ".join(fallback_up)}
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erreur Docker Swarm deploy : {res.stderr or res.stdout}",
+            )
 
         elif action == "scale":
             # Vérifie si le service Swarm existe
@@ -447,6 +567,7 @@ def orchestrate_tenant_stack(
             cmd = [
                 "docker", "service", "update",
                 "--force",
+                "--image", TENANT_IMAGE,
                 "--update-parallelism", "1",
                 "--update-delay", "3s",
                 "--update-order", "start-first",
@@ -454,7 +575,7 @@ def orchestrate_tenant_stack(
             ]
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             if res.returncode != 0:
-                deploy_cmd = ["docker", "stack", "deploy", "-c", str(rendered_stack_path), slug]
+                deploy_cmd = ["docker", "stack", "deploy", "--resolve-image=never", "-c", str(rendered_stack_path), slug]
                 subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
                 return {"executed": True, "mode": "SWARM", "command": " ".join(deploy_cmd)}
             return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
@@ -470,7 +591,7 @@ def orchestrate_tenant_stack(
             svc_scale = subprocess.run(["docker", "service", "scale", f"{slug}_tenant-app={target_replicas}"], capture_output=True, text=True)
             if svc_scale.returncode != 0:
                 ensure_tenant_image_built(compose_path.parent, env)
-                subprocess.run(["docker", "stack", "deploy", "-c", str(rendered_stack_path), slug], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
+                subprocess.run(["docker", "stack", "deploy", "--resolve-image=never", "-c", str(rendered_stack_path), slug], cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             return {"executed": True, "mode": "SWARM", "command": f"docker service scale {slug}_tenant-app={target_replicas}"}
 
         elif action == "down":
@@ -522,7 +643,8 @@ def evaluate_autoscale(db: Session) -> Dict[str, Any]:
     de réplicas de chaque établissement actif entre `min_replicas` et `max_replicas`.
     """
     real_cpu = psutil.cpu_percent(interval=0.1)
-    effective_cpu = SIMULATED_CPU_OVERRIDE if SIMULATED_CPU_OVERRIDE is not None else real_cpu
+    sim_override = get_simulated_cpu_override(db)
+    effective_cpu = sim_override if sim_override is not None else real_cpu
     ram_pct = psutil.virtual_memory().percent
 
     running_tenants = (
@@ -535,11 +657,10 @@ def evaluate_autoscale(db: Session) -> Dict[str, Any]:
     for t in running_tenants:
         current_rep = t.replicas or 1
         min_rep = t.min_replicas or 1
-        max_rep = t.max_replicas or 3
+        max_rep = t.max_replicas or 4
 
         # 1. Scale-Out automatique en cas de pic de charge (CPU >= 70% ou RAM >= 85%)
         if (effective_cpu >= AUTOSCALE_CPU_HIGH or ram_pct >= 85.0) and current_rep < max_rep:
-            # Si la charge dépasse 85%, on monte directement au max_replicas pour absorber le pic
             step = 2 if effective_cpu >= 85.0 else 1
             new_rep = min(max_rep, current_rep + step)
             try:
@@ -554,7 +675,7 @@ def evaluate_autoscale(db: Session) -> Dict[str, Any]:
                 pass
             t.replicas = new_rep
             msg = f"Scale-Out automatique : {t.slug} augmenté de {current_rep} → {new_rep} réplicas (CPU: {round(effective_cpu, 1)}%)"
-            record_cloud_event("ELASTICITY", t.slug, msg, effective_cpu)
+            record_cloud_event("ELASTICITY", t.slug, msg, effective_cpu, db=db)
             actions_taken.append({"slug": t.slug, "from": current_rep, "to": new_rep, "type": "SCALE_OUT"})
 
         # 2. Scale-In automatique en cas de retour au calme (CPU <= 30% et RAM < 75%)
@@ -572,7 +693,7 @@ def evaluate_autoscale(db: Session) -> Dict[str, Any]:
                 pass
             t.replicas = new_rep
             msg = f"Scale-In automatique : {t.slug} réduit de {current_rep} → {new_rep} réplicas (Charge basse CPU: {round(effective_cpu, 1)}%)"
-            record_cloud_event("ELASTICITY", t.slug, msg, effective_cpu)
+            record_cloud_event("ELASTICITY", t.slug, msg, effective_cpu, db=db)
             actions_taken.append({"slug": t.slug, "from": current_rep, "to": new_rep, "type": "SCALE_IN"})
 
     if actions_taken:
@@ -581,7 +702,7 @@ def evaluate_autoscale(db: Session) -> Dict[str, Any]:
     return {
         "effective_cpu_percent": round(effective_cpu, 1),
         "real_cpu_percent": round(real_cpu, 1),
-        "simulated_mode": SIMULATED_CPU_OVERRIDE is not None,
+        "simulated_mode": sim_override is not None,
         "actions_taken": actions_taken,
     }
 
@@ -590,6 +711,11 @@ def evaluate_autoscale(db: Session) -> Dict[str, Any]:
 # 6. APPLICATION FASTAPI & INITIALISATION DU SUPER-ADMIN GLOBAL
 # =============================================================================
 app = FastAPI(title="EduPulse SaaS - Control Plane & Docker Swarm Orchestrator API")
+
+
+@app.get("/api/health", include_in_schema=False)
+def healthcheck():
+    return {"status": "ok", "replica": socket.gethostname()}
 
 
 @app.on_event("startup")
@@ -605,45 +731,52 @@ def on_startup():
                 raise
             time.sleep(1.5)
 
-    Base.metadata.create_all(bind=engine)
+    # Verrou consultatif PostgreSQL pour éviter les conflits quand 2 réplicas portal-api démarrent ensemble
+    with engine.connect() as lock_conn:
+        lock_conn.execute(text("SELECT pg_advisory_lock(101010);"))
+        try:
+            Base.metadata.create_all(bind=engine)
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 2;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
+                    conn.commit()
+            except Exception:
+                pass
 
-    # Migrations défensives pour les colonnes Docker Swarm (Scalability & Elasticity)
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS replicas INTEGER DEFAULT 1;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS min_replicas INTEGER DEFAULT 1;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 3;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
-            conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
-            conn.commit()
-    except Exception:
-        pass
-
-    db = SessionLocal()
-    try:
-        super_admin = (
-            db.query(PortalUser)
-            .filter(PortalUser.email == SUPERADMIN_EMAIL.lower())
-            .first()
-        )
-        if not super_admin:
-            super_admin = PortalUser(
-                email=SUPERADMIN_EMAIL.lower(),
-                full_name=SUPERADMIN_NAME,
-                password_hash=hash_password(SUPERADMIN_PASSWORD),
-                role="SUPER_ADMIN",
-            )
-            db.add(super_admin)
-        else:
-            # S'assure que le mot de passe correspond toujours à la variable d'environnement
-            super_admin.password_hash = hash_password(SUPERADMIN_PASSWORD)
-            super_admin.role = "SUPER_ADMIN"
-        db.commit()
-    finally:
-        db.close()
-
-    swarm_state = "Docker Swarm Actif" if is_swarm_active() else "Mode Hybride Swarm/Compose Prêt"
-    record_cloud_event("SWARM", "control-plane", f"Control Plane démarré ({swarm_state}). Auto-Scaler en veille active.")
+            db = SessionLocal()
+            try:
+                super_admin = (
+                    db.query(PortalUser)
+                    .filter(PortalUser.email == SUPERADMIN_EMAIL.lower())
+                    .first()
+                )
+                if not super_admin:
+                    super_admin = PortalUser(
+                        email=SUPERADMIN_EMAIL.lower(),
+                        full_name=SUPERADMIN_NAME,
+                        password_hash=hash_password(SUPERADMIN_PASSWORD),
+                        role="SUPER_ADMIN",
+                    )
+                    db.add(super_admin)
+                else:
+                    super_admin.password_hash = hash_password(SUPERADMIN_PASSWORD)
+                    super_admin.role = "SUPER_ADMIN"
+                db.commit()
+                swarm_state = "Docker Swarm Actif" if is_swarm_active() else "Mode Hybride Swarm/Compose Prêt"
+                record_cloud_event(
+                    "SWARM",
+                    "portal-api",
+                    f"Réplica {socket.gethostname()} démarré ({swarm_state}).",
+                    db=db,
+                )
+            finally:
+                db.close()
+        finally:
+            lock_conn.execute(text("SELECT pg_advisory_unlock(101010);"))
 
 
 # =============================================================================
@@ -822,7 +955,8 @@ def get_vm_resources(
     vm_mem = psutil.virtual_memory()
     vm_disk = psutil.disk_usage("/")
     real_cpu_pct = psutil.cpu_percent(interval=0.1)
-    effective_cpu = SIMULATED_CPU_OVERRIDE if SIMULATED_CPU_OVERRIDE is not None else real_cpu_pct
+    sim_override = get_simulated_cpu_override(db)
+    effective_cpu = sim_override if sim_override is not None else real_cpu_pct
 
     running_tenants = (
         db.query(TenantStack)
@@ -839,7 +973,7 @@ def get_vm_resources(
     return {
         "cpu_percent": round(effective_cpu, 1),
         "real_cpu_percent": round(real_cpu_pct, 1),
-        "simulated_cpu": SIMULATED_CPU_OVERRIDE is not None,
+        "simulated_cpu": sim_override is not None,
         "ram_total_mb": ram_total_mb,
         "ram_used_mb": ram_used_mb,
         "ram_percent": round(vm_mem.percent, 1),
@@ -853,7 +987,7 @@ def get_vm_resources(
             "cpu_high": AUTOSCALE_CPU_HIGH,
             "cpu_low": AUTOSCALE_CPU_LOW,
         },
-        "events": ELASTICITY_EVENTS[:15],
+        "events": get_recent_cloud_events(db, 15),
         "autoscale_actions": autoscale_result["actions_taken"],
     }
 
@@ -903,27 +1037,28 @@ def sa_simulate_load(
     Permet de simuler un pic de charge CPU (ex: 85%) ou un retour à la normale (ex: 15% ou None)
     afin de démontrer l'Élasticité (Auto-Scaling Docker Swarm) en direct lors d'une soutenance.
     """
-    global SIMULATED_CPU_OVERRIDE
-    SIMULATED_CPU_OVERRIDE = payload.cpu_load
-    if SIMULATED_CPU_OVERRIDE is not None:
+    set_simulated_cpu_override(payload.cpu_load, db)
+    if payload.cpu_load is not None:
         record_cloud_event(
             "ELASTICITY",
             "cluster-sensor",
-            f"Simulation de charge activée : CPU fixé à {round(SIMULATED_CPU_OVERRIDE, 1)}% (Seuil Scale-Out: {AUTOSCALE_CPU_HIGH}% / Scale-In: {AUTOSCALE_CPU_LOW}%).",
-            SIMULATED_CPU_OVERRIDE,
+            f"Simulation de charge activée : CPU fixé à {round(payload.cpu_load, 1)}% (Seuil Scale-Out: {AUTOSCALE_CPU_HIGH}% / Scale-In: {AUTOSCALE_CPU_LOW}%).",
+            payload.cpu_load,
+            db=db,
         )
     else:
         record_cloud_event(
             "ELASTICITY",
             "cluster-sensor",
             "Fin de la simulation : retour à la sonde matérielle CPU réelle de la VM.",
+            db=db,
         )
 
     eval_res = evaluate_autoscale(db)
     return {
-        "simulated_cpu": SIMULATED_CPU_OVERRIDE,
+        "simulated_cpu": payload.cpu_load,
         "evaluation": eval_res,
-        "events": ELASTICITY_EVENTS[:15],
+        "events": get_recent_cloud_events(db, 15),
     }
 
 

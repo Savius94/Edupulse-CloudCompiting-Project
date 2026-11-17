@@ -13,10 +13,9 @@ services:
       - tenant-internal-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tenant_user -d tenant_db"]
-      interval: 3s
+      interval: 5s
       timeout: 3s
       retries: 10
-    restart: unless-stopped
     deploy:
       replicas: 1
       placement:
@@ -27,11 +26,11 @@ services:
         delay: 5s
       resources:
         limits:
-          cpus: "0.50"
-          memory: 512M
+          cpus: "0.40"
+          memory: 192M
         reservations:
-          cpus: "0.10"
-          memory: 128M
+          cpus: "0.05"
+          memory: 48M
 
   tenant-app:
     build:
@@ -43,7 +42,7 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
-    image: edupulse-tenant-app:latest
+    image: ${TENANT_IMAGE:-100.85.14.115:5000/edupulse-tenant-app:latest}
     environment:
       DATABASE_URL: postgresql://tenant_user:tenant_password@tenant-db:5432/tenant_db
       TENANT_SLUG: ${TENANT_SLUG}
@@ -65,21 +64,16 @@ services:
       - "${TENANT_PORT:-8101}:8000"
     depends_on:
       - tenant-db
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=saas-public-net"
-      - "traefik.swarm.network=saas-public-net"
-      - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
-      - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
     networks:
       - saas-public-net
       - tenant-internal-net
-    restart: unless-stopped
     deploy:
-      replicas: ${REPLICAS:-1}
+      replicas: ${REPLICAS:-2}
       placement:
         constraints:
-          - node.role == manager
+          - node.role == worker
+        preferences:
+          - spread: node.id
       update_config:
         parallelism: 1
         delay: 5s
@@ -94,14 +88,13 @@ services:
         max_attempts: 5
       resources:
         limits:
-          cpus: "${CPU_LIMIT:-0.50}"
-          memory: "${MEM_LIMIT:-512M}"
+          cpus: "${CPU_LIMIT:-0.40}"
+          memory: "${MEM_LIMIT:-256M}"
         reservations:
-          cpus: "0.10"
-          memory: 128M
+          cpus: "${CPU_RES:-0.05}"
+          memory: "${MEM_RES:-64M}"
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=saas-public-net"
         - "traefik.swarm.network=saas-public-net"
         - "traefik.http.routers.${TENANT_SLUG}.rule=Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.localhost`)"
         - "traefik.http.services.${TENANT_SLUG}.loadbalancer.server.port=8000"
@@ -109,6 +102,7 @@ services:
 networks:
   saas-public-net:
     external: true
+    name: saas-public-net
   tenant-internal-net:
     driver: ${TENANT_NET_DRIVER:-overlay}
     attachable: true

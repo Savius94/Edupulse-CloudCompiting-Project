@@ -1,37 +1,20 @@
+version: "3.8"
+
 services:
-  traefik:
-    image: traefik:v3
-    container_name: saas-traefik
-    environment:
-      DOCKER_API_VERSION: "1.44"
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      NO_PROXY: "*"
-      http_proxy: ""
-      https_proxy: ""
-      no_proxy: "*"
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=saas-public-net"
-      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
-      - "--providers.swarm.exposedbydefault=false"
-      - "--providers.swarm.network=saas-public-net"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.forwardedHeaders.insecure=true"
-      - "--entrypoints.web8000.address=:8000"
-      - "--entrypoints.web8000.forwardedHeaders.insecure=true"
-      - "--log.level=INFO"
+  # ---------------------------------------------------------------------------
+  # 1. INFRASTRUCTURE MANAGER UNIQUEMENT (Registry + Proxy API Swarm + BDD)
+  # ---------------------------------------------------------------------------
+  registry:
+    image: registry:2
     ports:
-      - "80:80"
-      - "8000:8000"
-      - "8080:8080"
+      - target: 5000
+        published: 5000
+        protocol: tcp
+        mode: host
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - registry_data:/var/lib/registry
     networks:
-      - saas-public-net
-    restart: unless-stopped
+      - portal-internal-net
     deploy:
       replicas: 1
       placement:
@@ -42,15 +25,51 @@ services:
         delay: 5s
       resources:
         limits:
-          cpus: "0.50"
-          memory: 256M
+          cpus: "0.35"
+          memory: 192M
         reservations:
-          cpus: "0.10"
+          cpus: "0.05"
+          memory: 32M
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      CONTAINERS: 1
+      SERVICES: 1
+      TASKS: 1
+      NETWORKS: 1
+      NODES: 1
+      INFO: 1
+      SWARM: 1
+      VOLUMES: 1
+      IMAGES: 1
+      DISTRIBUTION: 1
+      CONFIGS: 1
+      SECRETS: 1
+      POST: 1
+      ALLOW_RESTARTS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - portal-internal-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.25"
           memory: 64M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
 
   portal-db:
     image: postgres:16-alpine
-    container_name: saas-portal-db
     environment:
       POSTGRES_USER: portal_user
       POSTGRES_PASSWORD: portal_password
@@ -61,10 +80,9 @@ services:
       - portal-internal-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U portal_user -d portal_db"]
-      interval: 3s
+      interval: 5s
       timeout: 3s
       retries: 10
-    restart: unless-stopped
     deploy:
       replicas: 1
       placement:
@@ -75,16 +93,71 @@ services:
         delay: 5s
       resources:
         limits:
-          cpus: "0.50"
-          memory: 512M
+          cpus: "0.40"
+          memory: 256M
         reservations:
-          cpus: "0.10"
-          memory: 128M
+          cpus: "0.05"
+          memory: 64M
+
+  # ---------------------------------------------------------------------------
+  # 2. WORKERS UNIQUEMENT (Traefik Ingress + Page Principale portal-api)
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3
+    environment:
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: "*"
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
+    command:
+      - "--api.insecure=true"
+      - "--providers.swarm.endpoint=tcp://docker-socket-proxy:2375"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--providers.swarm.network=saas-public-net"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.forwardedHeaders.insecure=true"
+      - "--entrypoints.web8000.address=:8000"
+      - "--entrypoints.web8000.forwardedHeaders.insecure=true"
+      - "--log.level=INFO"
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 8000
+        published: 8000
+        protocol: tcp
+        mode: host
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: host
+    networks:
+      - saas-public-net
+      - portal-internal-net
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 160M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
 
   portal-api:
-    image: edupulse-portal-api:latest
+    image: ${REGISTRY_HOST:-100.85.14.115:5000}/edupulse-portal-api:latest
     build:
-      context: ./portal
+      context: .
+      dockerfile: portal/Dockerfile
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -92,9 +165,10 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
-    env_file:
-      - .env
     environment:
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      REGISTRY_HOST: ${REGISTRY_HOST:-100.85.14.115:5000}
+      TENANT_IMAGE: ${REGISTRY_HOST:-100.85.14.115:5000}/edupulse-tenant-app:latest
       DATABASE_URL: postgresql://portal_user:portal_password@portal-db:5432/portal_db
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@edupulse.mnbll.fr}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-SuperSecretPassword123!}
@@ -110,27 +184,19 @@ services:
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
       no_proxy: ${no_proxy:-}
-    ports:
-      - "8001:8000"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./tenant-stack:/app/tenant-stack
     depends_on:
       - portal-db
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=saas-public-net"
-      - "traefik.http.routers.portal.rule=Host(`${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`www.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
-      - "traefik.http.services.portal.loadbalancer.server.port=8000"
+      - docker-socket-proxy
     networks:
       - saas-public-net
       - portal-internal-net
-    restart: unless-stopped
     deploy:
-      replicas: ${PORTAL_REPLICAS:-1}
+      replicas: ${PORTAL_REPLICAS:-2}
       placement:
         constraints:
-          - node.role == manager
+          - node.role == worker
+        preferences:
+          - spread: node.id
       update_config:
         parallelism: 1
         delay: 5s
@@ -145,14 +211,14 @@ services:
         max_attempts: 5
       resources:
         limits:
-          cpus: "0.75"
-          memory: 512M
+          cpus: "0.50"
+          memory: 256M
         reservations:
-          cpus: "0.15"
-          memory: 128M
+          cpus: "0.10"
+          memory: 64M
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=saas-public-net"
+        - "traefik.swarm.network=saas-public-net"
         - "traefik.http.routers.portal.rule=Host(`${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`www.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
         - "traefik.http.services.portal.loadbalancer.server.port=8000"
 
@@ -167,3 +233,4 @@ networks:
 
 volumes:
   portal_db_data:
+  registry_data:

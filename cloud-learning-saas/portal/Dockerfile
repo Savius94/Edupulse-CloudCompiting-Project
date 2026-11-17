@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Installation du client Docker CLI + plugin Compose pour piloter le socket Docker de la VM
+# Installation du client Docker CLI + plugin Compose pour piloter le cluster Swarm (via socket ou docker-socket-proxy)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -14,10 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY portal/ .
+COPY tenant-stack/docker-compose.tenant.yml /app/tenant-stack/docker-compose.tenant.yml
 
 EXPOSE 8000
 
