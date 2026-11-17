@@ -1,8 +1,11 @@
 import os
 import re
+import json
 import time
 import socket
 import subprocess
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -50,11 +53,11 @@ ALLOWED_PLANS = {
 }
 
 # Configuration Scalabilité & Élasticité calibrée pour VMs 2 Go RAM / 1 vCPU
-# Chaque établissement démarre avec >= 2 réplicas (répartis sur Swarm-VM1 & Swarm-VM2)
+# Chaque forfait définit une plage de réplicas distincte et des limites de ressources
 PLAN_SCALING_RULES = {
-    200: {"initial_replicas": 2, "min_replicas": 1, "max_replicas": 4, "cpu_res": "0.05", "mem_res": "64M", "cpu_limit": "0.40", "mem_limit": "256M"},
-    500: {"initial_replicas": 2, "min_replicas": 1, "max_replicas": 6, "cpu_res": "0.05", "mem_res": "64M", "cpu_limit": "0.45", "mem_limit": "256M"},
-    1000: {"initial_replicas": 3, "min_replicas": 2, "max_replicas": 8, "cpu_res": "0.08", "mem_res": "64M", "cpu_limit": "0.50", "mem_limit": "320M"},
+    200: {"initial_replicas": 2, "min_replicas": 1, "max_replicas": 3, "cpu_res": "0.05", "mem_res": "64M", "cpu_limit": "0.35", "mem_limit": "200M"},
+    500: {"initial_replicas": 2, "min_replicas": 2, "max_replicas": 5, "cpu_res": "0.05", "mem_res": "64M", "cpu_limit": "0.45", "mem_limit": "256M"},
+    1000: {"initial_replicas": 3, "min_replicas": 2, "max_replicas": 8, "cpu_res": "0.08", "mem_res": "64M", "cpu_limit": "0.55", "mem_limit": "320M"},
 }
 
 AUTOSCALE_CPU_HIGH = 70.0
@@ -284,6 +287,10 @@ class CreateTenantRequest(BaseModel):
 class ScaleTenantRequest(BaseModel):
     replicas: Optional[int] = None
     delta: Optional[int] = None
+
+
+class ChangePlanRequest(BaseModel):
+    plan_max_users: int
 
 
 class SimulateLoadRequest(BaseModel):
@@ -550,16 +557,20 @@ def orchestrate_tenant_stack(
             )
 
         elif action == "scale":
-            # Vérifie si le service Swarm existe
             svc_name = f"{slug}_tenant-app"
-            cmd = ["docker", "service", "scale", f"{svc_name}={target_replicas}"]
-            res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=60)
+            cmd = ["docker", "service", "scale", "-d", f"{svc_name}={target_replicas}"]
+            res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=30)
             if res.returncode == 0:
                 return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
-            # Fallback si le stack avait été lancé via docker compose
-            fallback_cmd = ["docker", "compose", "-p", slug, "-f", str(compose_path), "up", "-d", "--no-recreate", "--scale", f"tenant-app={target_replicas}"]
-            subprocess.run(fallback_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=120)
-            return {"executed": True, "mode": "COMPOSE_FALLBACK", "command": " ".join(fallback_cmd)}
+            # Si le service Swarm n'existait pas encore, on (re)déploie le stack Swarm avec la nouvelle valeur REPLICAS
+            deploy_cmd = ["docker", "stack", "deploy", "--resolve-image=never", "-c", str(rendered_stack_path), slug]
+            res_dep = subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=60)
+            if res_dep.returncode == 0:
+                return {"executed": True, "mode": "SWARM_DEPLOY", "command": " ".join(deploy_cmd)}
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erreur lors du scaling Docker Swarm : {res.stderr or res_dep.stderr}",
+            )
 
         elif action == "rolling_update":
             ensure_tenant_image_built(compose_path.parent, env, force_rebuild=True)
@@ -819,6 +830,50 @@ def login(payload: AuthRequest, db: Session = Depends(get_db)):
     user = db.query(PortalUser).filter(PortalUser.email == email).first()
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Identifiants incorrects.")
+
+    token = create_access_token(user)
+    return {
+        "access_token": token,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role,
+        },
+    }
+
+
+@app.post("/api/auth/demo-switch/{target_role}")
+def demo_switch_portal_role(target_role: str, db: Session = Depends(get_db)):
+    """Bascule rapide du menu Paramètres (⚙️) avec un véritable JWT signé."""
+    role_key = target_role.strip().lower()
+    if role_key in {"superadmin", "super_admin"}:
+        user = db.query(PortalUser).filter(PortalUser.role == "SUPER_ADMIN").order_by(PortalUser.id.asc()).first()
+        if not user:
+            user = PortalUser(
+                email=SUPERADMIN_EMAIL.lower(),
+                full_name=SUPERADMIN_NAME,
+                password_hash=hash_password(SUPERADMIN_PASSWORD),
+                role="SUPER_ADMIN",
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+    elif role_key in {"client", "subscription_admin"}:
+        demo_email = "direction@lycee-moulin.fr"
+        user = db.query(PortalUser).filter(PortalUser.email == demo_email).first()
+        if not user:
+            user = PortalUser(
+                email=demo_email,
+                full_name="Direction Lycée Jean Moulin",
+                password_hash=hash_password("ClientPass123!"),
+                role="SUBSCRIPTION_ADMIN",
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+    else:
+        raise HTTPException(status_code=400, detail="Rôle de démonstration invalide.")
 
     token = create_access_token(user)
     return {
@@ -1098,13 +1153,129 @@ def sa_scale_tenant(
         tenant.max_replicas = target
     db.commit()
 
-    direction = "Scale-Out (+)" if target > old_replicas else "Scale-In (-)"
+    direction = "Scale-Out (+)" if target > old_replicas else ("Scale-In (-)" if target < old_replicas else "Ajustement")
     record_cloud_event(
         "SCALABILITY",
         tenant.slug,
         f"{direction} manuel : {tenant.slug} ajusté de {old_replicas} → {target} réplica(s) actifs.",
+        db=db,
     )
     return serialize_tenant(tenant)
+
+
+def fetch_tenant_user_count(slug: str) -> Optional[int]:
+    """Interroge l'API interne du stack d'établissement via le réseau overlay pour connaître son effectif réel."""
+    for host_candidate in [f"{slug}_tenant-app:8000", f"{slug}-app:8000"]:
+        try:
+            with urllib.request.urlopen(f"http://{host_candidate}/api/info", timeout=4) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if "current_users" in data:
+                    return int(data["current_users"])
+        except Exception:
+            continue
+    return None
+
+
+def apply_tenant_plan_change(tenant: TenantStack, new_plan: int, actor_label: str, db: Session) -> dict:
+    """
+    Upgrade ou Downgrade du forfait d'un établissement (200 / 500 / 1000).
+    Vérifie impérativement le nombre d'utilisateurs actifs lors d'un downgrade.
+    """
+    if new_plan not in ALLOWED_PLANS:
+        raise HTTPException(status_code=400, detail="Forfait invalide. Choisissez 200, 500 ou 1000 utilisateurs.")
+
+    old_plan = tenant.plan_max_users
+    if new_plan == old_plan:
+        return serialize_tenant(tenant)
+
+    # Contrôle strict du quota lors d'un downgrade
+    if new_plan < old_plan:
+        if tenant.status != "RUNNING":
+            raise HTTPException(
+                status_code=400,
+                detail="L'établissement doit être en cours d'exécution (RUNNING) pour vérifier le nombre d'utilisateurs avant de rétrograder le forfait.",
+            )
+        current_users = fetch_tenant_user_count(tenant.slug)
+        if current_users is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Impossible de contacter le stack de l'établissement pour vérifier le nombre d'utilisateurs actuels. Réessayez dans quelques secondes.",
+            )
+        if current_users > new_plan:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Downgrade refusé : l'établissement compte actuellement {current_users} utilisateur(s) "
+                    f"(limite du forfait cible : {new_plan}). Supprimez au moins {current_users - new_plan} compte(s) avant de rétrograder."
+                ),
+            )
+
+    rules = PLAN_SCALING_RULES[new_plan]
+    if new_plan > old_plan:
+        target_replicas = max(tenant.replicas or 1, rules["initial_replicas"])
+    else:
+        target_replicas = max(rules["min_replicas"], min(tenant.replicas or 1, rules["max_replicas"]))
+
+    tenant.plan_max_users = new_plan
+    tenant.domain = tenant.domain or f"{tenant.slug}.{BASE_DOMAIN}"
+    tenant.min_replicas = rules["min_replicas"]
+    tenant.max_replicas = rules["max_replicas"]
+    tenant.replicas = target_replicas
+    db.commit()
+    db.refresh(tenant)
+
+    owner = tenant.owner
+    if tenant.status == "RUNNING":
+        orchestrate_tenant_stack(
+            action="up",
+            slug=tenant.slug,
+            tenant_id=tenant.id,
+            institution_name=tenant.institution_name,
+            plan_max_users=tenant.plan_max_users,
+            admin_email=owner.email if owner else "",
+            admin_password_hash=owner.password_hash if owner else "",
+            admin_name=owner.full_name if owner else "",
+            replicas=target_replicas,
+        )
+
+    change_type = "Upgrade" if new_plan > old_plan else "Downgrade"
+    record_cloud_event(
+        "SCALABILITY",
+        tenant.slug,
+        f"{change_type} forfait ({old_plan} → {new_plan} users) par {actor_label} : {target_replicas} réplica(s), plage {rules['min_replicas']}↔{rules['max_replicas']}.",
+        db=db,
+    )
+    return serialize_tenant(tenant, owner.email if owner else "")
+
+
+@app.post("/api/tenants/{slug}/change-plan")
+def client_change_tenant_plan(
+    slug: str,
+    payload: ChangePlanRequest,
+    current_user: PortalUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Permet à un administrateur d'établissement d'upgrader ou downgrader son forfait."""
+    tenant = db.query(TenantStack).filter(TenantStack.slug == slug).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Établissement introuvable.")
+    if tenant.owner_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Vous n'êtes pas propriétaire de cet établissement.")
+    return apply_tenant_plan_change(tenant, payload.plan_max_users, current_user.email, db)
+
+
+@app.post("/api/superadmin/tenants/{slug}/change-plan")
+def sa_change_tenant_plan(
+    slug: str,
+    payload: ChangePlanRequest,
+    current_admin: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """Permet au Super-Admin d'upgrader ou downgrader le forfait d'un établissement."""
+    tenant = db.query(TenantStack).filter(TenantStack.slug == slug).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Stack introuvable.")
+    return apply_tenant_plan_change(tenant, payload.plan_max_users, f"Super-Admin ({current_admin.email})", db)
 
 
 @app.post("/api/superadmin/tenants/{slug}/autoscale-toggle")

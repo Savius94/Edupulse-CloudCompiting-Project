@@ -172,6 +172,7 @@ services:
       REGISTRY_HOST: ${REGISTRY_HOST:-100.85.14.115:5000}
       TENANT_IMAGE: ${REGISTRY_HOST:-100.85.14.115:5000}/edupulse-tenant-app:latest
       DATABASE_URL: postgresql://portal_user:portal_password@portal-db:5432/portal_db
+      JWT_SECRET: ${JWT_SECRET:-super_secret_cloud_jwt_key_2026}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@edupulse.mnbll.fr}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-SuperSecretPassword123!}
       BASE_DOMAIN: ${BASE_DOMAIN:-edupulse.mnbll.fr}

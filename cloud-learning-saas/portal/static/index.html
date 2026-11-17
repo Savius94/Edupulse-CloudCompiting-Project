@@ -429,6 +429,7 @@
               <h2 class="text-lg font-bold text-slate-900">Mes espaces scolaires actifs</h2>
               <button onclick="loadMyTenants()" class="text-xs font-semibold text-indigo-600 hover:underline">Actualiser</button>
             </div>
+            <div id="client-plan-msg" class="hidden text-xs p-3.5 rounded-xl mb-4"></div>
             <div id="client-tenants-list" class="space-y-4"></div>
           </div>
         </div>
@@ -798,53 +799,20 @@
         return;
       }
 
-      if (role === 'superadmin') {
-        try {
-          const res = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: 'superadmin@edupulse.mnbll.fr',
-              password: 'SuperSecretPassword123!'
-            })
-          });
-          if (res.ok) {
-            const data = await res.json();
-            saveSession(data.access_token, data.user);
-            switchView('superadmin');
-            return;
-          }
-        } catch (err) {}
-        // Mode démo local si API hors-ligne
-        saveSession('demo-sa-token', { email: 'superadmin@edupulse.mnbll.fr', full_name: 'Super Administrateur', role: 'SUPER_ADMIN' });
-        switchView('superadmin');
-      }
-
-      if (role === 'client') {
-        const demoEmail = 'direction@lycee-moulin.fr';
-        const demoPass = 'ClientPass123!';
-        try {
-          let res = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: demoEmail, password: demoPass })
-          });
-          if (!res.ok) {
-            res = await fetch('/api/auth/register', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: demoEmail, password: demoPass, full_name: 'Direction Lycée Jean Moulin' })
-            });
-          }
-          if (res.ok) {
-            const data = await res.json();
-            saveSession(data.access_token, data.user);
-            switchView('client');
-            return;
-          }
-        } catch (err) {}
-        saveSession('demo-client-token', { email: demoEmail, full_name: 'Direction Lycée Jean Moulin', role: 'SUBSCRIPTION_ADMIN' });
-        switchView('client');
+      try {
+        const res = await fetch(`/api/auth/demo-switch/${role}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.access_token) {
+          saveSession(data.access_token, data.user);
+          switchView(data.user.role === 'SUPER_ADMIN' ? 'superadmin' : 'client');
+          return;
+        }
+        alert(data.detail || "Impossible de basculer vers ce rôle.");
+      } catch (err) {
+        alert("Erreur de connexion au serveur lors du changement de rôle.");
       }
     }
 
@@ -900,7 +868,10 @@
       document.getElementById('view-landing').classList.add('hidden');
       document.getElementById('view-client').classList.add('hidden');
       document.getElementById('view-superadmin').classList.add('hidden');
-      document.getElementById('public-nav').classList.toggle('hidden', view !== 'landing');
+      const publicNav = document.getElementById('public-nav');
+      if (publicNav) {
+        publicNav.style.display = (view === 'landing') ? '' : 'none';
+      }
 
       if (view === 'landing') {
         document.getElementById('view-landing').classList.remove('hidden');
@@ -1070,9 +1041,18 @@
                   ${isActive ? 'En service' : 'Suspendu'}
                 </span>
               </div>
-              <p class="text-xs text-slate-600">
-                Offre souscrite : <strong>${planNames[t.plan_max_users] || (t.plan_max_users + ' utilisateurs max')}</strong>
-              </p>
+              <div class="flex flex-wrap items-center gap-2 pt-1">
+                <label class="text-xs text-slate-600 font-medium">Forfait :</label>
+                <select id="client-plan-select-${t.slug}" class="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800">
+                  <option value="200" ${t.plan_max_users === 200 ? 'selected' : ''}>Essentiel (200 users • 1↔3 rép.)</option>
+                  <option value="500" ${t.plan_max_users === 500 ? 'selected' : ''}>Campus (500 users • 2↔5 rép.)</option>
+                  <option value="1000" ${t.plan_max_users === 1000 ? 'selected' : ''}>Académie (1000 users • 2↔8 rép.)</option>
+                </select>
+                <button onclick="clientChangePlan('${t.slug}', ${t.plan_max_users})"
+                  class="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold transition">
+                  Appliquer
+                </button>
+              </div>
               <p class="text-xs text-slate-500 flex flex-wrap items-center gap-2">
                 <span>Adresse web dédiée : <a href="${primaryUrl}" target="_blank" class="font-semibold text-indigo-600 hover:underline">${displayDomain}</a></span>
                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-[11px] border border-indigo-200">
@@ -1280,7 +1260,19 @@
                   <span class="text-[10px]">↗</span>
                 </a>
               </td>
-              <td class="py-3 px-2 text-xs font-semibold">${t.plan_max_users} users</td>
+              <td class="py-3 px-2">
+                <div class="flex items-center gap-1.5">
+                  <select id="sa-plan-select-${t.slug}" class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800">
+                    <option value="200" ${t.plan_max_users === 200 ? 'selected' : ''}>200 users (1↔3)</option>
+                    <option value="500" ${t.plan_max_users === 500 ? 'selected' : ''}>500 users (2↔5)</option>
+                    <option value="1000" ${t.plan_max_users === 1000 ? 'selected' : ''}>1000 users (2↔8)</option>
+                  </select>
+                  <button onclick="saChangePlan('${t.slug}', ${t.plan_max_users})" title="Appliquer le changement de forfait (Upgrade/Downgrade)"
+                    class="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold transition">
+                    OK
+                  </button>
+                </div>
+              </td>
               <td class="py-3 px-2">
                 <div class="inline-flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200">
                   <button onclick="saScaleTenant('${t.slug}', -1)" title="Scale-In (-1 réplica)"
@@ -1362,13 +1354,80 @@
       refreshSuperAdmin();
     }
 
+    async function clientChangePlan(slug, currentPlan) {
+      const sel = document.getElementById(`client-plan-select-${slug}`);
+      const msgEl = document.getElementById('client-plan-msg');
+      if (!sel) return;
+      const newPlan = parseInt(sel.value, 10);
+      if (newPlan === currentPlan) return;
+
+      const label = newPlan > currentPlan ? 'Upgrade' : 'Downgrade';
+      if (msgEl) {
+        msgEl.className = 'text-xs p-3.5 rounded-xl mb-4 bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium';
+        msgEl.textContent = `⏳ ${label} du forfait de « ${slug} » vers ${newPlan} utilisateurs en cours (ajustement des réplicas et du quota)...`;
+        msgEl.classList.remove('hidden');
+      }
+
+      try {
+        const res = await fetch(`/api/tenants/${slug}/change-plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ plan_max_users: newPlan })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (msgEl) {
+            msgEl.className = 'text-xs p-3.5 rounded-xl mb-4 bg-rose-50 text-rose-700 border border-rose-200 font-medium';
+            msgEl.textContent = `❌ ${data.detail || 'Impossible de modifier le forfait.'}`;
+          }
+          sel.value = String(currentPlan);
+          return;
+        }
+        if (msgEl) {
+          msgEl.className = 'text-xs p-3.5 rounded-xl mb-4 bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium';
+          msgEl.textContent = `✅ Forfait mis à jour (${newPlan} utilisateurs max • ${data.replicas} réplicas actifs, plage ${data.min_replicas}↔${data.max_replicas}).`;
+        }
+        await loadMyTenants();
+      } catch (e) {
+        if (msgEl) {
+          msgEl.className = 'text-xs p-3.5 rounded-xl mb-4 bg-rose-50 text-rose-700 border border-rose-200 font-medium';
+          msgEl.textContent = '❌ Erreur réseau lors de la modification du forfait.';
+        }
+      }
+    }
+
+    async function saChangePlan(slug, currentPlan) {
+      const sel = document.getElementById(`sa-plan-select-${slug}`);
+      if (!sel) return;
+      const newPlan = parseInt(sel.value, 10);
+      if (newPlan === currentPlan) return;
+
+      const res = await fetch(`/api/superadmin/tenants/${slug}/change-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ plan_max_users: newPlan })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.detail || 'Impossible de modifier le forfait.');
+        sel.value = String(currentPlan);
+        return;
+      }
+      await refreshSuperAdmin();
+    }
+
     async function saScaleTenant(slug, delta) {
-      await fetch(`/api/superadmin/tenants/${slug}/scale`, {
+      const res = await fetch(`/api/superadmin/tenants/${slug}/scale`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ delta })
       });
-      refreshSuperAdmin();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail || 'Erreur lors du scaling manuel.');
+        return;
+      }
+      await refreshSuperAdmin();
     }
 
     async function saToggleAutoscale(slug) {
