@@ -1,13 +1,10 @@
 # =============================================================================
-# CONFIGURATION CADDY SUR LE VPS RELAIS (AVEC TAILSCALE)
+# CONFIGURATION CADDY SUR LE VPS RELAIS (AVEC TAILSCALE) — HAUTE DISPONIBILITÉ
 # =============================================================================
-# Architecture Haute Disponibilité (Workers uniquement) :
-# - Swarm-Manager (100.85.14.115) : Registry + Docker Socket Proxy + BDDs (0 app web)
-# - Swarm-VM1     (100.71.91.21)  : Worker 1 (Traefik :80 + portal-api + tenant-app)
-# - Swarm-VM2     (100.83.159.51) : Worker 2 (Traefik :80 + portal-api + tenant-app)
-#
-# Caddy pointe UNIQUEMENT sur les 2 Workers (100.71.91.21 et 100.83.159.51).
-# Si l'un des 2 Workers tombe, Caddy bascule immédiatement tout le trafic sur l'autre !
+# Avec health_uri /ping + dial_timeout 1s + lb_retries 2 :
+# - Si un Worker tombe, Caddy détecte sa perte en 1s et réessaie automatiquement
+#   la même requête sur le Worker survivant (0 requête perdue !).
+# - Active healthcheck /ping toutes les 3s pour exclure le nœud mort du pool.
 
 # 1. Votre application existante
 mnbll.fr {
@@ -18,7 +15,17 @@ mnbll.fr {
 edupulse.mnbll.fr {
     reverse_proxy 100.71.91.21:80 100.83.159.51:80 {
         lb_policy round_robin
-        fail_duration 5s
+        lb_try_duration 3s
+        lb_try_interval 250ms
+        lb_retries 2
+        max_fails 1
+        fail_duration 15s
+        health_uri /ping
+        health_interval 3s
+        health_timeout 1s
+        transport http {
+            dial_timeout 1s
+        }
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
@@ -26,11 +33,21 @@ edupulse.mnbll.fr {
     }
 }
 
-# 3. Sous-domaines des Établissements (*.edupulse.mnbll.fr en HTTP sur le port 80)
+# 3. Sous-domaines des Établissements & Portainer (*.edupulse.mnbll.fr en HTTP sur le port 80)
 http://*.edupulse.mnbll.fr {
     reverse_proxy 100.71.91.21:80 100.83.159.51:80 {
         lb_policy round_robin
-        fail_duration 5s
+        lb_try_duration 3s
+        lb_try_interval 250ms
+        lb_retries 2
+        max_fails 1
+        fail_duration 15s
+        health_uri /ping
+        health_interval 3s
+        health_timeout 1s
+        transport http {
+            dial_timeout 1s
+        }
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}

@@ -113,6 +113,8 @@ services:
       no_proxy: "*"
     command:
       - "--api.insecure=true"
+      - "--ping=true"
+      - "--ping.entryPoint=web"
       - "--providers.swarm.endpoint=tcp://docker-socket-proxy:2375"
       - "--providers.swarm.exposedbydefault=false"
       - "--providers.swarm.network=saas-public-net"
@@ -190,6 +192,12 @@ services:
     networks:
       - saas-public-net
       - portal-internal-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     deploy:
       replicas: ${PORTAL_REPLICAS:-2}
       placement:
@@ -219,8 +227,14 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.swarm.network=saas-public-net"
+        - "traefik.http.middlewares.portal-retry.retry.attempts=3"
+        - "traefik.http.middlewares.portal-retry.retry.initialinterval=100ms"
         - "traefik.http.routers.portal.rule=Host(`${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`www.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`cloudproject.mnbll.fr`) || Host(`localhost`) || Host(`127.0.0.1`)"
+        - "traefik.http.routers.portal.middlewares=portal-retry"
         - "traefik.http.services.portal.loadbalancer.server.port=8000"
+        - "traefik.http.services.portal.loadbalancer.healthcheck.path=/api/health"
+        - "traefik.http.services.portal.loadbalancer.healthcheck.interval=3s"
+        - "traefik.http.services.portal.loadbalancer.healthcheck.timeout=1s"
 
 networks:
   saas-public-net:

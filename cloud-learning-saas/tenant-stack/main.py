@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import jwt
-from fastapi import FastAPI, Depends, HTTPException, Header, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Depends, HTTPException, Header, Response, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, func, text
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 from demo_data import seed_demo_dataset
@@ -39,9 +40,15 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "ge
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+db_connect_args = {"connect_timeout": 3} if DATABASE_URL.startswith("postgresql") else {}
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=db_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+MAINTENANCE_MESSAGE = (
+    "Désolé du dérangement, nos services de données sont momentanément en maintenance. "
+    "Nous faisons tout notre possible pour régler la panne au plus vite."
+)
 
 # ================= MODÈLES SQL (ISOLÉS PAR ÉTABLISSEMENT) =================
 class User(Base):
@@ -129,6 +136,23 @@ class XAPIStatementInput(BaseModel):
 
 # ================= INITIALISATION DE L'APPLICATION =================
 app = FastAPI(title=f"EduPulse Stack - {INSTITUTION_NAME}")
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_maintenance_handler(request: Request, exc: SQLAlchemyError):
+    """Renvoie une erreur 503 propre lorsque la base de données est temporairement injoignable."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "maintenance": True,
+            "detail": MAINTENANCE_MESSAGE,
+        },
+    )
+
+
+@app.get("/api/health", include_in_schema=False)
+def tenant_healthcheck():
+    return {"status": "ok", "replica": socket.gethostname()}
 
 def get_db():
     db = SessionLocal()
@@ -506,8 +530,15 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
 # ================= ROUTES D'INFORMATIONS & CONNEXION =================
 @app.get("/api/info")
 def get_stack_info(db: Session = Depends(get_db)):
-    total_users = db.query(func.count(User.id)).scalar() or 0
-    total_statements = db.query(func.count(XAPIStatementRecord.id)).scalar() or 0
+    db_available = True
+    total_users = 0
+    total_statements = 0
+    try:
+        total_users = db.query(func.count(User.id)).scalar() or 0
+        total_statements = db.query(func.count(XAPIStatementRecord.id)).scalar() or 0
+    except Exception:
+        db_available = False
+
     return {
         "tenant_slug": TENANT_SLUG,
         "institution_name": INSTITUTION_NAME,
@@ -517,7 +548,9 @@ def get_stack_info(db: Session = Depends(get_db)):
         "remaining_slots": max(0, MAX_USERS - total_users),
         "total_xapi_statements": total_statements,
         "admin_email": ADMIN_EMAIL,
-        "replica_id": socket.gethostname()
+        "replica_id": socket.gethostname(),
+        "db_available": db_available,
+        "maintenance_message": "" if db_available else MAINTENANCE_MESSAGE,
     }
 
 
