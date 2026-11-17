@@ -239,9 +239,13 @@ networks:
     name: saas-public-net
     driver: ${NETWORK_DRIVER:-overlay}
     attachable: true
+    driver_opts:
+      com.docker.network.driver.mtu: "1200"
   portal-internal-net:
     driver: ${NETWORK_DRIVER:-overlay}
     attachable: true
+    driver_opts:
+      com.docker.network.driver.mtu: "1200"
 
 volumes:
   portal_db_data:

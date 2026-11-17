@@ -115,6 +115,8 @@ networks:
   tenant-internal-net:
     driver: ${TENANT_NET_DRIVER:-overlay}
     attachable: true
+    driver_opts:
+      com.docker.network.driver.mtu: "1200"
 
 volumes:
   tenant_db_data:

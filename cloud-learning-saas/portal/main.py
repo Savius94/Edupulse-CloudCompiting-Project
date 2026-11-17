@@ -305,20 +305,29 @@ class SimulateLoadRequest(BaseModel):
 # =============================================================================
 # 5. ORCHESTRATEUR DOCKER SWARM & DOCKER COMPOSE (SCALABILITY, ELASTICITY, AGILITY)
 # =============================================================================
+_SWARM_ACTIVE_CACHE: Dict[str, Any] = {"value": None, "expires_at": 0.0}
+
+
 def is_swarm_active() -> bool:
-    """Détecte si le démon Docker hôte est actuellement un noeud Docker Swarm actif."""
+    """Détecte si le démon Docker hôte est actuellement un noeud Docker Swarm actif (avec cache 30s)."""
     if ORCHESTRATOR_MODE == "compose":
         return False
+    now = time.time()
+    if _SWARM_ACTIVE_CACHE["value"] is not None and now < _SWARM_ACTIVE_CACHE["expires_at"]:
+        return bool(_SWARM_ACTIVE_CACHE["value"])
     try:
         res = subprocess.run(
             ["docker", "info", "--format", "{{.Swarm.LocalNodeState}}"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=3,
         )
-        return res.returncode == 0 and res.stdout.strip().lower() == "active"
+        val = res.returncode == 0 and res.stdout.strip().lower() == "active"
     except Exception:
-        return False
+        val = False
+    _SWARM_ACTIVE_CACHE["value"] = val
+    _SWARM_ACTIVE_CACHE["expires_at"] = now + 30.0
+    return val
 
 
 def get_swarm_cluster_details() -> Dict[str, Any]:
@@ -331,25 +340,11 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
 
     if swarm_active:
         try:
-            n_res = subprocess.run(
-                ["docker", "info", "--format", "{{.Swarm.Nodes}}|{{.Swarm.Managers}}"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if n_res.returncode == 0 and "|" in n_res.stdout:
-                parts = n_res.stdout.strip().split("|")
-                nodes_count = int(parts[0] or 1)
-                managers_count = int(parts[1] or 1)
-        except Exception:
-            pass
-
-        try:
             nls_res = subprocess.run(
                 ["docker", "node", "ls", "--format", "{{.Hostname}}|{{.Status}}|{{.Availability}}|{{.ManagerStatus}}"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=3,
             )
             if nls_res.returncode == 0:
                 for line in nls_res.stdout.strip().splitlines():
@@ -361,6 +356,9 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
                             "availability": av.strip(),
                             "role": "Manager" if mgr.strip() else "Worker",
                         })
+                if nodes_list:
+                    nodes_count = len(nodes_list)
+                    managers_count = sum(1 for n in nodes_list if n["role"] == "Manager") or 1
         except Exception:
             pass
 
@@ -369,7 +367,7 @@ def get_swarm_cluster_details() -> Dict[str, Any]:
                 ["docker", "service", "ls", "-q"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=3,
             )
             if s_res.returncode == 0:
                 lines = [l for l in s_res.stdout.strip().splitlines() if l.strip()]
@@ -1550,20 +1548,12 @@ STATIC_DIR = BASE_DIR / "static"
 
 
 @app.get("/", include_in_schema=False)
-def serve_portal_ui():
-    return FileResponse(STATIC_DIR / "index.html")
-
-
 @app.get("/espace-client", include_in_schema=False)
 @app.get("/client", include_in_schema=False)
-def serve_client_ui():
-    return FileResponse(STATIC_DIR / "client.html")
-
-
 @app.get("/superadmin", include_in_schema=False)
 @app.get("/admin", include_in_schema=False)
-def serve_superadmin_ui():
-    return FileResponse(STATIC_DIR / "superadmin.html")
+def serve_portal_ui():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
