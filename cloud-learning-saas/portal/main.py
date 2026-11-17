@@ -1542,4 +1542,16 @@ def serve_portal_ui():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/espace-client", include_in_schema=False)
+@app.get("/client", include_in_schema=False)
+def serve_client_ui():
+    return FileResponse(STATIC_DIR / "client.html")
+
+
+@app.get("/superadmin", include_in_schema=False)
+@app.get("/admin", include_in_schema=False)
+def serve_superadmin_ui():
+    return FileResponse(STATIC_DIR / "superadmin.html")
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
