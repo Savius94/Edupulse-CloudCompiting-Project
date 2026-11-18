@@ -1,0 +1,140 @@
+[
+  {
+    "id": "notara-reseau-01",
+    "title": "Fiche contrôle — Réseaux & Sécurité",
+    "course_name": "Réseaux & Sécurité",
+    "duration_min": 12,
+    "description": "Petite série de questions sur TCP/IP, firewall et bonnes pratiques.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "Le port HTTPS standard est :",
+        "choices": ["21", "22", "80", "443"],
+        "answer_index": 3
+      },
+      {
+        "id": "q2",
+        "prompt": "Un firewall sert principalement à :",
+        "choices": ["Accélérer le CPU", "Filtrer le trafic réseau", "Compiler le code", "Remplacer le DNS"],
+        "answer_index": 1
+      },
+      {
+        "id": "q3",
+        "prompt": "TLS protège surtout :",
+        "choices": ["La confidentialité en transit", "La capacité disque", "Le rendu CSS", "Le nom de domaine"],
+        "answer_index": 0
+      },
+      {
+        "id": "q4",
+        "prompt": "Une adresse privée typique est :",
+        "choices": ["8.8.8.8", "1.1.1.1", "192.168.1.10", "208.67.222.222"],
+        "answer_index": 2
+      }
+    ]
+  },
+  {
+    "id": "notara-sql-01",
+    "title": "Interro flash — SQL",
+    "course_name": "Bases de Données SQL",
+    "duration_min": 10,
+    "description": "Jointures, contraintes et hygiène des requêtes.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "FOREIGN KEY sert à :",
+        "choices": ["Créer un index plein texte", "Lier deux tables avec intégrité référentielle", "Chiffrer une colonne", "Supprimer PostgreSQL"],
+        "answer_index": 1
+      },
+      {
+        "id": "q2",
+        "prompt": "SELECT DISTINCT retire :",
+        "choices": ["Les NULL uniquement", "Les doublons de lignes projetées", "Les index", "Les transactions"],
+        "answer_index": 1
+      },
+      {
+        "id": "q3",
+        "prompt": "BEGIN / COMMIT concernent :",
+        "choices": ["Les transactions", "Le DNS", "Docker Swarm", "Traefik"],
+        "answer_index": 0
+      },
+      {
+        "id": "q4",
+        "prompt": "JSONB est utile pour :",
+        "choices": ["Stocker des documents JSON indexables", "Remplacer HTTPS", "Compiler Python", "Créer un VLAN"],
+        "answer_index": 0
+      }
+    ]
+  },
+  {
+    "id": "notara-algo-01",
+    "title": "Atelier — Algorithmique",
+    "course_name": "Algorithmique & Python",
+    "duration_min": 11,
+    "description": "Complexité, structures et idiomes Python.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "La recherche dichotomique suppose :",
+        "choices": ["Une liste non triée", "Une collection triée", "Un graphe non orienté", "Un DNS"],
+        "answer_index": 1
+      },
+      {
+        "id": "q2",
+        "prompt": "set en Python garantit surtout :",
+        "choices": ["L'ordre d'insertion strict historique", "Des éléments uniques", "Des index numériques", "Le multithreading"],
+        "answer_index": 1
+      },
+      {
+        "id": "q3",
+        "prompt": "O(n log n) est typique de :",
+        "choices": ["Accès tableau", "Tri fusion / heap sort", "Boucle constante", "Hash parfait"],
+        "answer_index": 1
+      },
+      {
+        "id": "q4",
+        "prompt": "enumerate(liste) fournit :",
+        "choices": ["Uniquement les valeurs", "Index + valeur", "Un hash SHA", "Un socket"],
+        "answer_index": 1
+      },
+      {
+        "id": "q5",
+        "prompt": "Une récursion sans cas d'arrêt provoque :",
+        "choices": ["Un import circulaire CSS", "Un risque de RecursionError", "Un certificat TLS", "Rien"],
+        "answer_index": 1
+      }
+    ]
+  },
+  {
+    "id": "notara-cloud-01",
+    "title": "Brief — Cloud & NIST",
+    "course_name": "Architecture Cloud",
+    "duration_min": 10,
+    "description": "Modèles de service et caractéristiques Cloud.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "PaaS laisse le client gérer surtout :",
+        "choices": ["L'hyperviseur", "Le code applicatif", "Le datacenter physique", "Les switches ToR"],
+        "answer_index": 1
+      },
+      {
+        "id": "q2",
+        "prompt": "Resource pooling implique :",
+        "choices": ["Aucun partage", "Mutualisation isolée logiquement", "Un seul client mondial", "Pas de réseau"],
+        "answer_index": 1
+      },
+      {
+        "id": "q3",
+        "prompt": "Measured service signifie :",
+        "choices": ["Usage suivi / facturable", "Images JPEG obligatoires", "Pas de logs", "DNS interdit"],
+        "answer_index": 0
+      },
+      {
+        "id": "q4",
+        "prompt": "Un LRS xAPI reçoit :",
+        "choices": ["Des statements d'expérience d'apprentissage", "Des paquets BGP", "Des ISO Docker", "Des certificats uniquement"],
+        "answer_index": 0
+      }
+    ]
+  }
+]

@@ -1,0 +1,17 @@
+services:
+  notara:
+    build: .
+    image: notara-app:local
+    ports:
+      - "8241:8200"
+    environment:
+      DEFAULT_EDUPULSE_URL: ${DEFAULT_EDUPULSE_URL:-http://host.docker.internal:8101}
+      NOTARA_BRAND: Notara
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - notara_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  notara_data:
