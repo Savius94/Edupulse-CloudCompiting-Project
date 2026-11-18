@@ -30,6 +30,10 @@ ENV/
 *.log
 *.tmp
 
+# External assessment apps (local SQLite)
+external-apps/**/data/
+*.db
+
 # Operating System & IDE
 .DS_Store
 Thumbs.db
