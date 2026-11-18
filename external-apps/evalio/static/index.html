@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evalio — Borne d’évaluation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --void: #0b0d10;
+      --panel: #12161c;
+      --panel-2: #1a2029;
+      --line: #2a3340;
+      --ink: #e8edf4;
+      --dim: #8b97a8;
+      --signal: #f0c94a;
+      --cyan: #3ad0c8;
+      --danger: #ff6b6b;
+      --ok: #5dde9a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      background:
+        linear-gradient(90deg, rgba(58,208,200,.04) 1px, transparent 1px) 0 0 / 28px 28px,
+        linear-gradient(rgba(58,208,200,.04) 1px, transparent 1px) 0 0 / 28px 28px,
+        radial-gradient(900px 420px at 85% -10%, rgba(240,201,74,.12), transparent 55%),
+        var(--void);
+    }
+    .tape {
+      height: 10px;
+      background: repeating-linear-gradient(-45deg, var(--signal) 0 10px, #111 10px 20px);
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(18,22,28,.92);
+      backdrop-filter: blur(8px);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .bar {
+      max-width: 1080px; margin: 0 auto; padding: 16px 18px;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    }
+    .brand { display: flex; gap: 12px; align-items: center; }
+    .mark {
+      width: 44px; height: 44px; border: 2px solid var(--signal);
+      display: grid; place-items: center; font-family: Syne, sans-serif; font-weight: 800;
+      color: var(--signal); transform: rotate(-4deg);
+      box-shadow: 4px 4px 0 var(--cyan);
+    }
+    .brand h1 {
+      margin: 0; font-family: Syne, sans-serif; font-size: 1.35rem; letter-spacing: -.03em;
+      text-transform: uppercase;
+    }
+    .brand p { margin: 2px 0 0; color: var(--dim); font-size: .72rem; }
+    .chip {
+      border: 1px dashed var(--cyan); color: var(--cyan);
+      padding: 6px 10px; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+    }
+    main { max-width: 1080px; margin: 0 auto; padding: 28px 18px 70px; }
+    .stage {
+      display: grid; grid-template-columns: 1.15fr .85fr; gap: 18px;
+    }
+    @media (max-width: 860px) { .stage { grid-template-columns: 1fr; } }
+    .panel {
+      background: linear-gradient(180deg, var(--panel-2), var(--panel));
+      border: 1px solid var(--line);
+      box-shadow: 0 0 0 1px rgba(255,255,255,.02), 12px 12px 0 rgba(0,0,0,.35);
+      padding: 22px;
+      position: relative;
+      overflow: hidden;
+    }
+    .panel::before {
+      content: "EVALIO / SCANTRON MODE";
+      position: absolute; top: 10px; right: -28px;
+      transform: rotate(18deg);
+      font-size: .62rem; letter-spacing: .14em; color: rgba(240,201,74,.55);
+      border: 1px solid rgba(240,201,74,.35); padding: 3px 28px;
+    }
+    h2 {
+      margin: 0 0 10px; font-family: Syne, sans-serif; font-size: clamp(1.5rem, 3vw, 2.1rem);
+      letter-spacing: -.03em; line-height: 1.05; text-transform: uppercase;
+    }
+    .lead { color: var(--dim); line-height: 1.55; font-size: .86rem; }
+    .dots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .dot {
+      font-size: .68rem; color: var(--ink); background: #0f1318;
+      border: 1px solid var(--line); padding: 6px 8px;
+    }
+    label { display: block; font-size: .7rem; color: var(--cyan); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+    input {
+      width: 100%; background: #0a0c10; color: var(--ink); border: 1px solid var(--line);
+      padding: 12px; font: inherit; margin-bottom: 12px;
+    }
+    input:focus { outline: 1px solid var(--signal); border-color: var(--signal); }
+    .btn {
+      appearance: none; border: 0; cursor: pointer; font: inherit; font-weight: 600;
+      padding: 12px 14px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .btn-primary { width: 100%; background: var(--signal); color: #111; }
+    .btn-primary:hover { filter: brightness(1.05); }
+    .btn-ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    .btn-go { background: var(--cyan); color: #062222; width: 100%; }
+    .msg { display: none; margin-top: 10px; padding: 10px; font-size: .8rem; border: 1px solid; }
+    .msg.err { display: block; color: var(--danger); border-color: rgba(255,107,107,.4); background: rgba(255,107,107,.08); }
+    .msg.ok { display: block; color: var(--ok); border-color: rgba(93,222,154,.35); background: rgba(93,222,154,.08); }
+    .hidden { display: none !important; }
+    .userbox { display: none; align-items: center; gap: 10px; font-size: .78rem; }
+    .avatar {
+      width: 34px; height: 34px; border: 1px solid var(--signal); display: grid; place-items: center;
+      font-family: Syne, sans-serif; font-weight: 700; color: var(--signal);
+    }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin: 8px 0 14px; }
+    .section-head h2 { font-size: 1.25rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .quiz {
+      border: 1px solid var(--line); background: #10151c; padding: 16px;
+      clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+    }
+    .quiz .code { color: var(--signal); font-size: .68rem; letter-spacing: .1em; }
+    .quiz h3 { margin: 8px 0; font-family: Syne, sans-serif; text-transform: uppercase; font-size: 1rem; }
+    .quiz p { color: var(--dim); font-size: .78rem; min-height: 46px; }
+    .question {
+      border: 1px dashed var(--line); padding: 14px; margin-bottom: 12px; background: #0e1218;
+    }
+    .question h4 { margin: 0 0 10px; font-size: .92rem; font-weight: 500; }
+    .choice {
+      display: flex; gap: 10px; align-items: flex-start; padding: 10px;
+      border: 1px solid var(--line); margin-bottom: 8px; cursor: pointer; background: #0a0d12;
+    }
+    .choice:has(input:checked) { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
+    .choice input { width: auto; margin: 2px 0 0; }
+    .score {
+      font-family: Syne, sans-serif; font-size: 3.2rem; color: var(--signal); letter-spacing: -.04em;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+    th, td { text-align: left; padding: 10px 6px; border-bottom: 1px solid var(--line); }
+    th { color: var(--dim); font-weight: 500; text-transform: uppercase; letter-spacing: .06em; font-size: .66rem; }
+    .tag { padding: 3px 8px; border: 1px solid; font-size: .68rem; text-transform: uppercase; }
+    .tag-ok { color: var(--ok); border-color: rgba(93,222,154,.4); }
+    .tag-err { color: var(--danger); border-color: rgba(255,107,107,.4); }
+    footer { max-width: 1080px; margin: 0 auto; padding: 0 18px 40px; color: var(--dim); font-size: .72rem; }
+  </style>
+</head>
+<body>
+  <div class="tape"></div>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <div class="mark">EV</div>
+        <div>
+          <h1>Evalio</h1>
+          <p>Borne externe · sync LRS xAPI</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <span class="chip">Hors EduPulse</span>
+        <div id="userbox" class="userbox">
+          <div class="avatar" id="user-avatar">É</div>
+          <div>
+            <div id="user-name" style="font-weight:600"></div>
+            <div id="user-meta" style="color:var(--dim);font-size:.7rem"></div>
+          </div>
+          <button class="btn btn-ghost" id="btn-logout" type="button">Out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-login" class="stage">
+      <div class="panel">
+        <h2>Composer hors SaaS.<br/>Pousser la note.</h2>
+        <p class="lead">
+          Evalio est une borne d’évaluation indépendante (esprit Pronote).
+          Les QCM se passent ici. La note est injectée dans EduPulse uniquement via xAPI.
+        </p>
+        <div class="dots">
+          <span class="dot">NOTE /20</span>
+          <span class="dot">AUTH TENANT</span>
+          <span class="dot">POST /xapi/statements</span>
+        </div>
+      </div>
+      <div class="panel">
+        <form id="login-form">
+          <label for="edupulse_url">URL stack établissement</label>
+          <input id="edupulse_url" required placeholder="http://host.docker.internal:8101" />
+          <label for="email">Email élève</label>
+          <input id="email" type="email" required placeholder="lucas.martin@demo.fr" />
+          <label for="password">Mot de passe</label>
+          <input id="password" type="password" required placeholder="Demo123!" />
+          <button class="btn btn-primary" type="submit">Valider ticket d’accès</button>
+          <div id="login-error" class="msg"></div>
+          <div id="login-ok" class="msg"></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="view-home" class="hidden">
+      <div class="section-head">
+        <div>
+          <h2>Sessions ouvertes</h2>
+          <p class="lead" style="margin:0">Sélectionnez une épreuve. Correction + sync automatiques.</p>
+        </div>
+        <button class="btn btn-ghost" id="btn-refresh" type="button">Refresh</button>
+      </div>
+      <div id="quiz-grid" class="grid"></div>
+      <div class="section-head" style="margin-top:28px">
+        <div>
+          <h2>Journal des envois</h2>
+          <p class="lead" style="margin:0">Trace locale Evalio → LRS EduPulse.</p>
+        </div>
+      </div>
+      <div class="panel" style="overflow:auto">
+        <table>
+          <thead><tr><th>Horodatage</th><th>Matière</th><th>Score</th><th>Sync</th></tr></thead>
+          <tbody id="attempts-body"><tr><td colspan="4" style="color:var(--dim)">Aucune tentative.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-quiz" class="hidden">
+      <div class="panel" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div id="quiz-course" style="color:var(--signal);font-size:.72rem;letter-spacing:.1em"></div>
+            <h2 id="quiz-title" style="font-size:1.4rem;margin-top:6px"></h2>
+            <p id="quiz-desc" class="lead" style="margin:0"></p>
+          </div>
+          <button class="btn btn-ghost" type="button" id="btn-back-home">Retour</button>
+        </div>
+      </div>
+      <form id="quiz-form" class="panel"></form>
+    </section>
+
+    <section id="view-result" class="hidden">
+      <div class="panel" style="text-align:center;max-width:520px;margin:0 auto">
+        <div style="color:var(--dim);letter-spacing:.12em;font-size:.7rem">BULLETIN MACHINE</div>
+        <div class="score" id="res-score">—</div>
+        <p id="res-detail" class="lead"></p>
+        <div id="res-sync" style="margin:14px 0"></div>
+        <button class="btn btn-primary" style="width:auto;min-width:200px" type="button" id="btn-result-home">Nouvelle session</button>
+      </div>
+    </section>
+  </main>
+  <footer>Evalio ≠ module EduPulse. Interop uniquement via Experience API (xAPI).</footer>
+
+  <script>
+    const state = {
+      token: localStorage.getItem("evalio_token") || "",
+      edupulseUrl: localStorage.getItem("evalio_edupulse_url") || "",
+      user: JSON.parse(localStorage.getItem("evalio_user") || "null"),
+      currentQuiz: null,
+    };
+    const $ = (id) => document.getElementById(id);
+    function show(view) {
+      ["login","home","quiz","result"].forEach(v => $(`view-${v}`).classList.toggle("hidden", v !== view));
+    }
+    function initials(name) {
+      return (name || "É").split(/\s+/).slice(0,2).map(p => p[0]?.toUpperCase() || "").join("") || "É";
+    }
+    function renderUser() {
+      if (!state.user || !state.token) { $("userbox").style.display = "none"; return; }
+      $("userbox").style.display = "flex";
+      $("user-name").textContent = state.user.full_name;
+      $("user-meta").textContent = `${state.user.role} · ${state.user.email}`;
+      $("user-avatar").textContent = initials(state.user.full_name);
+    }
+    async function loadConfig() {
+      const cfg = await (await fetch("/api/config")).json();
+      if (!$("edupulse_url").value) $("edupulse_url").value = state.edupulseUrl || cfg.default_edupulse_url || "";
+    }
+    async function loadQuizzes() {
+      const quizzes = await (await fetch("/api/quizzes")).json();
+      $("quiz-grid").innerHTML = quizzes.map(q => `
+        <article class="quiz">
+          <div class="code">${q.course_name}</div>
+          <h3>${q.title}</h3>
+          <p>${q.description}</p>
+          <div style="color:var(--dim);font-size:.72rem;margin-bottom:10px">${q.question_count} Q · ${q.duration_min} min</div>
+          <button class="btn btn-go" data-quiz="${q.id}" type="button">Démarrer</button>
+        </article>`).join("");
+      $("quiz-grid").querySelectorAll("[data-quiz]").forEach(btn => btn.addEventListener("click", () => openQuiz(btn.dataset.quiz)));
+    }
+    async function loadAttempts() {
+      if (!state.user) return;
+      const rows = await (await fetch(`/api/attempts?email=${encodeURIComponent(state.user.email)}`)).json();
+      const body = $("attempts-body");
+      if (!rows.length) { body.innerHTML = `<tr><td colspan="4" style="color:var(--dim)">Aucune tentative.</td></tr>`; return; }
+      body.innerHTML = rows.map(r => {
+        const ok = r.sync_status === "synced";
+        return `<tr>
+          <td>${r.created_at ? new Date(r.created_at).toLocaleString("fr-FR") : "—"}</td>
+          <td>${r.course_name}</td>
+          <td><strong>${r.score_raw}/20</strong></td>
+          <td><span class="tag ${ok ? "tag-ok" : "tag-err"}">${ok ? "synced" : r.sync_status}</span></td>
+        </tr>`;
+      }).join("");
+    }
+    async function openQuiz(quizId) {
+      const quiz = await (await fetch(`/api/quizzes/${quizId}`)).json();
+      state.currentQuiz = quiz;
+      $("quiz-course").textContent = quiz.course_name;
+      $("quiz-title").textContent = quiz.title;
+      $("quiz-desc").textContent = quiz.description;
+      $("quiz-form").innerHTML = quiz.questions.map((q,i) => `
+        <div class="question">
+          <h4>${String(i+1).padStart(2,"0")} · ${q.prompt}</h4>
+          ${q.choices.map((c,idx) => `
+            <label class="choice"><input type="radio" name="${q.id}" value="${idx}" required /><span>${c}</span></label>
+          `).join("")}
+        </div>`).join("") + `<button class="btn btn-primary" type="submit">Clôturer & sync xAPI</button>`;
+      show("quiz");
+    }
+    $("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = $("login-error"); const ok = $("login-ok");
+      err.className = "msg"; ok.className = "msg"; err.textContent = ""; ok.textContent = "";
+      const res = await fetch("/api/auth/login", {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ edupulse_url: $("edupulse_url").value.trim(), email: $("email").value.trim(), password: $("password").value })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { err.textContent = data.detail || "Connexion impossible"; err.className = "msg err"; return; }
+      if (data.user?.role !== "ETUDIANT") { err.textContent = "Compte élève requis."; err.className = "msg err"; return; }
+      state.token = data.access_token; state.user = data.user; state.edupulseUrl = data.edupulse_url;
+      localStorage.setItem("evalio_token", state.token);
+      localStorage.setItem("evalio_user", JSON.stringify(state.user));
+      localStorage.setItem("evalio_edupulse_url", state.edupulseUrl);
+      ok.textContent = data.message || "OK"; ok.className = "msg ok";
+      renderUser(); await loadQuizzes(); await loadAttempts(); show("home");
+    });
+    $("quiz-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const answers = {};
+      state.currentQuiz.questions.forEach(q => {
+        const checked = document.querySelector(`input[name="${q.id}"]:checked`);
+        if (checked) answers[q.id] = parseInt(checked.value, 10);
+      });
+      const res = await fetch("/api/attempts/submit", {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          edupulse_url: state.edupulseUrl, access_token: state.token,
+          student_email: state.user.email, student_name: state.user.full_name,
+          quiz_id: state.currentQuiz.id, answers
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const d = data.detail;
+        if (d && typeof d === "object" && d.score_raw != null) {
+          $("res-score").textContent = `${d.score_raw}/20`;
+          $("res-detail").textContent = `${d.correct_count}/${d.total_questions} correct`;
+          $("res-sync").innerHTML = `<span class="tag tag-err">sync failed</span><p class="lead">${d.sync_detail || ""}</p>`;
+          show("result"); return;
+        }
+        alert(typeof d === "string" ? d : (d?.message || "Échec")); return;
+      }
+      $("res-score").textContent = `${data.score_raw}/20`;
+      $("res-detail").textContent = `${data.correct_count}/${data.total_questions} · ${data.course_name}`;
+      $("res-sync").innerHTML = `<span class="tag tag-ok">synced</span><p class="lead">${data.sync_detail || ""}</p>`;
+      show("result"); loadAttempts();
+    });
+    $("btn-logout").onclick = () => {
+      state.token = ""; state.user = null;
+      localStorage.removeItem("evalio_token"); localStorage.removeItem("evalio_user");
+      renderUser(); show("login");
+    };
+    $("btn-back-home").onclick = () => show("home");
+    $("btn-result-home").onclick = async () => { await loadAttempts(); show("home"); };
+    $("btn-refresh").onclick = async () => { await loadQuizzes(); await loadAttempts(); };
+    (async () => {
+      await loadConfig(); renderUser();
+      if (state.token && state.user?.role === "ETUDIANT") { await loadQuizzes(); await loadAttempts(); show("home"); }
+      else show("login");
+    })();
+  </script>
+</body>
+</html>

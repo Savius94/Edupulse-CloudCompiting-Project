@@ -1,0 +1,146 @@
+[
+  {
+    "id": "quiz-cloud-01",
+    "title": "Contrôle — Architecture Cloud",
+    "course_name": "Architecture Cloud",
+    "duration_min": 15,
+    "description": "QCM de contrôle continu sur les modèles de service et de déploiement Cloud (NIST).",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "Selon le NIST, quel modèle de service livre une application clé en main accessible via navigateur ?",
+        "choices": ["IaaS", "PaaS", "SaaS", "FaaS"],
+        "answer_index": 2
+      },
+      {
+        "id": "q2",
+        "prompt": "Lequel n'est PAS une caractéristique essentielle du Cloud selon le NIST ?",
+        "choices": ["On-demand self-service", "Rapid elasticity", "Measured service", "Installation manuelle sur poste client"],
+        "answer_index": 3
+      },
+      {
+        "id": "q3",
+        "prompt": "Dans une architecture multi-tenant en silo, chaque établissement dispose typiquement de :",
+        "choices": ["Une seule BDD partagée sans isolation", "Sa propre stack applicative + BDD isolée", "Uniquement un compte e-mail", "Aucun conteneur Docker"],
+        "answer_index": 1
+      },
+      {
+        "id": "q4",
+        "prompt": "L'élasticité rapide (rapid elasticity) signifie que :",
+        "choices": ["Les prix baissent chaque année", "Les ressources peuvent scale up/out puis être libérées", "Le code source est open source", "Le DNS est obligatoire"],
+        "answer_index": 1
+      },
+      {
+        "id": "q5",
+        "prompt": "Un reverse proxy comme Traefik sert principalement à :",
+        "choices": ["Compiler le code Python", "Router le trafic HTTP vers les bons services", "Remplacer PostgreSQL", "Générer des notes aléatoires"],
+        "answer_index": 1
+      }
+    ]
+  },
+  {
+    "id": "quiz-python-01",
+    "title": "TP noté — Algorithmique & Python",
+    "course_name": "Algorithmique & Python",
+    "duration_min": 12,
+    "description": "Évaluation courte sur les bases Python et la complexité.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "Quelle structure Python est mutable ?",
+        "choices": ["tuple", "str", "list", "frozenset"],
+        "answer_index": 2
+      },
+      {
+        "id": "q2",
+        "prompt": "La complexité moyenne d'un accès dans un dict Python est :",
+        "choices": ["O(n)", "O(log n)", "O(1)", "O(n²)"],
+        "answer_index": 2
+      },
+      {
+        "id": "q3",
+        "prompt": "Que produit : list(range(3)) ?",
+        "choices": ["[1, 2, 3]", "[0, 1, 2]", "[0, 1, 2, 3]", "(0, 1, 2)"],
+        "answer_index": 1
+      },
+      {
+        "id": "q4",
+        "prompt": "Le mot-clé pour définir une fonction est :",
+        "choices": ["func", "def", "fn", "lambda uniquement"],
+        "answer_index": 1
+      }
+    ]
+  },
+  {
+    "id": "quiz-sql-01",
+    "title": "Interro — Bases de Données SQL",
+    "course_name": "Bases de Données SQL",
+    "duration_min": 10,
+    "description": "Questions sur le modèle relationnel et SQL.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "Une clé primaire sert à :",
+        "choices": ["Accélérer uniquement les JOIN", "Identifier de façon unique une ligne", "Chiffrer la base", "Remplacer les index"],
+        "answer_index": 1
+      },
+      {
+        "id": "q2",
+        "prompt": "Quel type PostgreSQL convient au stockage d'un statement xAPI complet ?",
+        "choices": ["INTEGER", "BOOLEAN", "JSONB", "UUID seul"],
+        "answer_index": 2
+      },
+      {
+        "id": "q3",
+        "prompt": "La clause qui filtre les lignes après un GROUP BY est :",
+        "choices": ["WHERE", "HAVING", "ORDER BY", "LIMIT"],
+        "answer_index": 1
+      },
+      {
+        "id": "q4",
+        "prompt": "Une injection SQL est évitée principalement grâce à :",
+        "choices": ["Des requêtes concaténées", "Des requêtes paramétrées", "Désactiver HTTPS", "Stocker le mot de passe en clair"],
+        "answer_index": 1
+      }
+    ]
+  },
+  {
+    "id": "quiz-devops-01",
+    "title": "Quiz — DevOps & Conteneurisation",
+    "course_name": "DevOps & Conteneurisation",
+    "duration_min": 12,
+    "description": "Docker, Compose et bonnes pratiques de déploiement.",
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "Un volume Docker sert surtout à :",
+        "choices": ["Accélérer le CPU", "Persister les données hors du cycle de vie du conteneur", "Remplacer le DNS", "Compiler les images"],
+        "answer_index": 1
+      },
+      {
+        "id": "q2",
+        "prompt": "docker compose up -d lance les services :",
+        "choices": ["En avant-plan uniquement", "En arrière-plan (détaché)", "Sans réseau", "Sans images"],
+        "answer_index": 1
+      },
+      {
+        "id": "q3",
+        "prompt": "Dans Docker Swarm, scale out signifie :",
+        "choices": ["Réduire le nombre de réplicas", "Augmenter le nombre de réplicas", "Supprimer le stack", "Changer le DNS"],
+        "answer_index": 1
+      },
+      {
+        "id": "q4",
+        "prompt": "Un healthcheck Docker permet de :",
+        "choices": ["Facturer le client", "Vérifier qu'un service répond correctement", "Créer un compte admin", "Générer un certificat SSL"],
+        "answer_index": 1
+      },
+      {
+        "id": "q5",
+        "prompt": "xAPI (Experience API) sert à :",
+        "choices": ["Décrire des expériences d'apprentissage sous forme de statements", "Remplacer Docker", "Chiffrer le disque", "Gérer le DNS wildcard"],
+        "answer_index": 0
+      }
+    ]
+  }
+]

@@ -1,0 +1,18 @@
+services:
+  evalio:
+    build: .
+    image: evalio-app:local
+    ports:
+      - "8240:8200"
+    environment:
+      # URL par défaut du tenant EduPulse (modifiable dans l'UI)
+      DEFAULT_EDUPULSE_URL: ${DEFAULT_EDUPULSE_URL:-http://host.docker.internal:8101}
+      EVALIO_BRAND: Evalio
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - evalio_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  evalio_data:
