@@ -169,7 +169,25 @@ Si la base est neuve (`count <= 1`) et que `MAX_USERS >= 16`, l'établissement e
 
 ---
 
-## 6. Consignes Techniques pour la Maintenance (IA & Développeurs)
+## 6. Monitoring des logs (Loki + Grafana)
+
+Stack dédiée dans `monitoring/` : **Promtail** collecte les logs de **tous** les conteneurs Docker du poste, **Loki** les stocke, **Grafana** les visualise.
+
+```powershell
+cd monitoring
+docker compose up -d
+```
+
+| Service | URL | Accès |
+|---------|-----|--------|
+| Grafana | http://localhost:3002 | `admin` / `admin` |
+| Loki API | http://localhost:3100 | — |
+
+Dashboard provisionné : **EduPulse — Logs globaux**. Requêtes LogQL utiles : `{job="docker"}`, `{compose_project="evalio"}`, `{compose_project=~"edupulse.*"}`, `{job="docker"} \|= "error"`.
+
+---
+
+## 7. Consignes Techniques pour la Maintenance (IA & Développeurs)
 
 * **Réseau externe `saas-public-net`** : Ne jamais supprimer ce réseau externe dans `tenant-stack/docker-compose.tenant.yml`, car il permet à Traefik de router les requêtes vers chaque conteneur `${TENANT_SLUG}-app`[cite: 3].
 * **Syntaxe Traefik** : Conserver la règle `Host(`${TENANT_SLUG}.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`${TENANT_SLUG}.edupulse.mnbll.fr`) || Host(`${TENANT_SLUG}.localhost`)` sur l'entrypoint `web` et le port interne `8000`[cite: 3].
