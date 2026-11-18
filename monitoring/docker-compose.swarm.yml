@@ -24,7 +24,7 @@ services:
         constraints:
           - node.role == manager
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 5s
       resources:
         limits:
@@ -48,7 +48,7 @@ services:
     deploy:
       mode: global
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 5s
       resources:
         limits:
@@ -86,7 +86,7 @@ services:
         constraints:
           - node.role == manager
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 5s
       resources:
         limits:

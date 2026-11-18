@@ -45,7 +45,8 @@ docker push "${REGISTRY_HOST}/edupulse-portal-api:latest"
 docker build -t "${REGISTRY_HOST}/edupulse-tenant-app:latest" ./tenant-stack
 docker push "${REGISTRY_HOST}/edupulse-tenant-app:latest"
 
-echo "=== 5. Déploiement / Mise à jour sans coupure (Rolling Update) sur les Workers ==="
+echo "=== 5. Synchronisation de la stack & Rolling Update sur les Workers ==="
+docker stack deploy --resolve-image=always -c docker-compose.yml edupulse --with-registry-auth
 docker service update --force --with-registry-auth \
   --image "${REGISTRY_HOST}/edupulse-portal-api:latest" \
   --env-add "GEMINI_API_KEY=${GEMINI_API_KEY:-}" \
