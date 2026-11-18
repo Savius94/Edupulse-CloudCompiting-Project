@@ -193,8 +193,10 @@
           <label for="email">Email scolaire</label>
           <input id="email" type="email" required placeholder="lucas.martin@demo.fr" />
           <label for="password">Mot de passe</label>
-          <input id="password" type="password" required placeholder="Demo123!" />
+          <input id="password" type="password" required placeholder="Demo123!" autocomplete="current-password" />
           <button class="btn btn-primary" type="submit">Se connecter</button>
+          <button class="btn btn-ghost" type="button" id="btn-fill-demo" style="width:100%;margin-top:8px">Remplir compte démo</button>
+          <p class="lead" style="margin:10px 0 0;font-size:.72rem">Démo : <code>lucas.martin@demo.fr</code> / <code>Demo123!</code></p>
           <div id="login-error" class="msg"></div>
           <div id="login-ok" class="msg"></div>
         </form>
@@ -317,6 +319,12 @@
         </div>`).join("") + `<button class="btn btn-primary" type="submit">Terminer et enregistrer la note</button>`;
       show("quiz");
     }
+    $("btn-fill-demo").addEventListener("click", () => {
+      $("edupulse_url").value = "http://host.docker.internal:8101";
+      $("email").value = "lucas.martin@demo.fr";
+      $("password").value = "Demo123!";
+    });
+
     $("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const err = $("login-error"); const ok = $("login-ok");

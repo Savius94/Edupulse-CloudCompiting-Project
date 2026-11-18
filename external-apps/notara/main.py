@@ -100,6 +100,9 @@ def normalize_base_url(url: str) -> str:
         raise HTTPException(status_code=400, detail="Adresse de l'établissement obligatoire")
     if not u.startswith("http://") and not u.startswith("https://"):
         u = "http://" + u
+    # Depuis un conteneur Docker Windows/Mac, localhost pointe sur le conteneur, pas l'hôte.
+    u = u.replace("://localhost", "://host.docker.internal")
+    u = u.replace("://127.0.0.1", "://host.docker.internal")
     return u.rstrip("/")
 
 
@@ -229,7 +232,10 @@ async def login(body: LoginBody):
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(
                 f"{base}/api/auth/login",
-                json={"email": body.email.strip().lower(), "password": body.password},
+                json={
+                    "email": body.email.strip().lower(),
+                    "password": body.password.strip(),
+                },
             )
     except httpx.RequestError as exc:
         raise HTTPException(
