@@ -1,7 +1,5 @@
 """
-Evalio — Plateforme EXTERNE d'évaluations scolaires.
-Indépendante d'EduPulse (comme Pronote) : les élèves passent des tests ici,
-puis les notes sont poussées vers le LRS xAPI du tenant EduPulse de l'établissement.
+Evalio — Borne d'évaluations scolaires (QCM notés /20).
 """
 
 from __future__ import annotations
@@ -62,7 +60,7 @@ class Attempt(Base):
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=f"{BRAND} — Évaluations externes", version="1.0.0")
+app = FastAPI(title=f"{BRAND} — Évaluations", version="1.0.0")
 
 
 def load_quizzes() -> List[Dict[str, Any]]:
@@ -99,7 +97,7 @@ def public_quiz(quiz: Dict[str, Any]) -> Dict[str, Any]:
 def normalize_base_url(url: str) -> str:
     u = (url or "").strip().rstrip("/")
     if not u:
-        raise HTTPException(status_code=400, detail="URL EduPulse obligatoire")
+        raise HTTPException(status_code=400, detail="Adresse de l'établissement obligatoire")
     if not u.startswith("http://") and not u.startswith("https://"):
         u = "http://" + u
     return u.rstrip("/")
@@ -199,13 +197,6 @@ def config():
     return {
         "brand": BRAND,
         "default_edupulse_url": DEFAULT_EDUPULSE_URL,
-        "integration": {
-            "type": "external",
-            "protocol": "xAPI Experience API",
-            "endpoint": "POST {edupulse_url}/xapi/statements",
-            "auth": "Bearer JWT obtenu via POST {edupulse_url}/api/auth/login",
-            "note": "Evalio n'est PAS intégré dans EduPulse : c'est une application tierce (type Pronote).",
-        },
     }
 
 
@@ -243,29 +234,24 @@ async def login(body: LoginBody):
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Impossible de joindre EduPulse à {base}. Vérifiez l'URL du stack établissement. ({exc})",
+            detail=f"Impossible de joindre l'établissement ({base}). Vérifiez l'adresse. ({exc})",
         ) from exc
 
     if res.status_code == 401:
-        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect (côté EduPulse)")
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
     if res.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"EduPulse a répondu {res.status_code}: {res.text[:300]}")
+        raise HTTPException(status_code=502, detail=f"Erreur établissement ({res.status_code})")
 
     data = res.json()
     user = data.get("user") or {}
     if user.get("role") not in ("ETUDIANT", "ENSEIGNANT", "ADMIN"):
-        raise HTTPException(status_code=403, detail="Compte EduPulse non reconnu")
+        raise HTTPException(status_code=403, detail="Compte non reconnu")
 
     return {
         "access_token": data["access_token"],
         "user": user,
         "edupulse_url": base,
-        "message": (
-            "Connexion réussie via EduPulse. "
-            "Les notes des tests Evalio seront envoyées automatiquement au LRS de votre établissement."
-            if user.get("role") == "ETUDIANT"
-            else "Compte connecté. Seuls les élèves peuvent soumettre des évaluations notées."
-        ),
+        "message": "Connexion réussie." if user.get("role") == "ETUDIANT" else "Compte connecté.",
     }
 
 
@@ -273,13 +259,13 @@ async def login(body: LoginBody):
 async def submit_attempt(body: SubmitBody):
     """Corrige le test localement, enregistre la tentative, pousse la note vers EduPulse (xAPI)."""
     if not body.access_token:
-        raise HTTPException(status_code=401, detail="Jeton EduPulse manquant")
+        raise HTTPException(status_code=401, detail="Session manquante")
 
     role = jwt_role_unverified(body.access_token)
     if role and role != "ETUDIANT":
         raise HTTPException(
             status_code=403,
-            detail="Seuls les comptes Élève EduPulse peuvent soumettre une évaluation notée.",
+            detail="Seuls les comptes élèves peuvent soumettre une évaluation.",
         )
 
     quiz = get_quiz(body.quiz_id)
@@ -334,13 +320,13 @@ async def submit_attempt(body: SubmitBody):
             payload = res.json()
             sync_status = "synced"
             xapi_id = payload.get("id")
-            sync_detail = "Note poussée avec succès vers le LRS EduPulse (xAPI)."
+            sync_detail = "Note enregistrée."
         else:
             sync_status = "error"
-            sync_detail = f"EduPulse HTTP {res.status_code}: {res.text[:500]}"
+            sync_detail = f"Erreur d'enregistrement ({res.status_code})."
     except httpx.RequestError as exc:
         sync_status = "error"
-        sync_detail = f"Échec réseau vers EduPulse: {exc}"
+        sync_detail = f"Échec réseau: {exc}"
 
     db = SessionLocal()
     try:
@@ -370,7 +356,7 @@ async def submit_attempt(body: SubmitBody):
         raise HTTPException(
             status_code=502,
             detail={
-                "message": "Test corrigé dans Evalio, mais l'envoi vers EduPulse a échoué.",
+                "message": "Test corrigé, mais l'enregistrement distant a échoué.",
                 "attempt_id": attempt_id,
                 "score_raw": score_raw,
                 "correct_count": correct,

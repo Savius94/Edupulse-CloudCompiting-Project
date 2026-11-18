@@ -155,11 +155,11 @@
         <div class="mark">EV</div>
         <div>
           <h1>Evalio</h1>
-          <p>Borne externe · sync LRS xAPI</p>
+          <p>Borne d’évaluation</p>
         </div>
       </div>
       <div style="display:flex;gap:10px;align-items:center">
-        <span class="chip">Hors EduPulse</span>
+        <span class="chip">Session élève</span>
         <div id="userbox" class="userbox">
           <div class="avatar" id="user-avatar">É</div>
           <div>
@@ -175,26 +175,26 @@
   <main>
     <section id="view-login" class="stage">
       <div class="panel">
-        <h2>Composer hors SaaS.<br/>Pousser la note.</h2>
+        <h2>Contrôles.<br/>Notes. Résultats.</h2>
         <p class="lead">
-          Evalio est une borne d’évaluation indépendante (esprit Pronote).
-          Les QCM se passent ici. La note est injectée dans EduPulse uniquement via xAPI.
+          Connectez-vous avec vos identifiants scolaires, choisissez une épreuve
+          et validez vos réponses. La note est calculée immédiatement.
         </p>
         <div class="dots">
-          <span class="dot">NOTE /20</span>
-          <span class="dot">AUTH TENANT</span>
-          <span class="dot">POST /xapi/statements</span>
+          <span class="dot">QCM /20</span>
+          <span class="dot">CORRECTION AUTO</span>
+          <span class="dot">HISTORIQUE</span>
         </div>
       </div>
       <div class="panel">
         <form id="login-form">
-          <label for="edupulse_url">URL stack établissement</label>
+          <label for="edupulse_url">Adresse de l’établissement</label>
           <input id="edupulse_url" required placeholder="http://host.docker.internal:8101" />
-          <label for="email">Email élève</label>
+          <label for="email">Email scolaire</label>
           <input id="email" type="email" required placeholder="lucas.martin@demo.fr" />
           <label for="password">Mot de passe</label>
           <input id="password" type="password" required placeholder="Demo123!" />
-          <button class="btn btn-primary" type="submit">Valider ticket d’accès</button>
+          <button class="btn btn-primary" type="submit">Se connecter</button>
           <div id="login-error" class="msg"></div>
           <div id="login-ok" class="msg"></div>
         </form>
@@ -204,21 +204,21 @@
     <section id="view-home" class="hidden">
       <div class="section-head">
         <div>
-          <h2>Sessions ouvertes</h2>
-          <p class="lead" style="margin:0">Sélectionnez une épreuve. Correction + sync automatiques.</p>
+          <h2>Épreuves ouvertes</h2>
+          <p class="lead" style="margin:0">Choisissez un contrôle. Correction automatique à la fin.</p>
         </div>
-        <button class="btn btn-ghost" id="btn-refresh" type="button">Refresh</button>
+        <button class="btn btn-ghost" id="btn-refresh" type="button">Actualiser</button>
       </div>
       <div id="quiz-grid" class="grid"></div>
       <div class="section-head" style="margin-top:28px">
         <div>
-          <h2>Journal des envois</h2>
-          <p class="lead" style="margin:0">Trace locale Evalio → LRS EduPulse.</p>
+          <h2>Mes résultats</h2>
+          <p class="lead" style="margin:0">Historique de vos dernières évaluations.</p>
         </div>
       </div>
       <div class="panel" style="overflow:auto">
         <table>
-          <thead><tr><th>Horodatage</th><th>Matière</th><th>Score</th><th>Sync</th></tr></thead>
+          <thead><tr><th>Date</th><th>Matière</th><th>Note</th><th>Statut</th></tr></thead>
           <tbody id="attempts-body"><tr><td colspan="4" style="color:var(--dim)">Aucune tentative.</td></tr></tbody>
         </table>
       </div>
@@ -240,15 +240,15 @@
 
     <section id="view-result" class="hidden">
       <div class="panel" style="text-align:center;max-width:520px;margin:0 auto">
-        <div style="color:var(--dim);letter-spacing:.12em;font-size:.7rem">BULLETIN MACHINE</div>
+        <div style="color:var(--dim);letter-spacing:.12em;font-size:.7rem">RÉSULTAT</div>
         <div class="score" id="res-score">—</div>
         <p id="res-detail" class="lead"></p>
         <div id="res-sync" style="margin:14px 0"></div>
-        <button class="btn btn-primary" style="width:auto;min-width:200px" type="button" id="btn-result-home">Nouvelle session</button>
+        <button class="btn btn-primary" style="width:auto;min-width:200px" type="button" id="btn-result-home">Retour aux épreuves</button>
       </div>
     </section>
   </main>
-  <footer>Evalio ≠ module EduPulse. Interop uniquement via Experience API (xAPI).</footer>
+  <footer>© 2026 Evalio — Évaluations scolaires</footer>
 
   <script>
     const state = {
@@ -298,7 +298,7 @@
           <td>${r.created_at ? new Date(r.created_at).toLocaleString("fr-FR") : "—"}</td>
           <td>${r.course_name}</td>
           <td><strong>${r.score_raw}/20</strong></td>
-          <td><span class="tag ${ok ? "tag-ok" : "tag-err"}">${ok ? "synced" : r.sync_status}</span></td>
+          <td><span class="tag ${ok ? "tag-ok" : "tag-err"}">${ok ? "enregistré" : "erreur"}</span></td>
         </tr>`;
       }).join("");
     }
@@ -314,7 +314,7 @@
           ${q.choices.map((c,idx) => `
             <label class="choice"><input type="radio" name="${q.id}" value="${idx}" required /><span>${c}</span></label>
           `).join("")}
-        </div>`).join("") + `<button class="btn btn-primary" type="submit">Clôturer & sync xAPI</button>`;
+        </div>`).join("") + `<button class="btn btn-primary" type="submit">Terminer et enregistrer la note</button>`;
       show("quiz");
     }
     $("login-form").addEventListener("submit", async (e) => {
@@ -356,14 +356,14 @@
         if (d && typeof d === "object" && d.score_raw != null) {
           $("res-score").textContent = `${d.score_raw}/20`;
           $("res-detail").textContent = `${d.correct_count}/${d.total_questions} correct`;
-          $("res-sync").innerHTML = `<span class="tag tag-err">sync failed</span><p class="lead">${d.sync_detail || ""}</p>`;
+          $("res-sync").innerHTML = `<span class="tag tag-err">enregistrement incomplet</span><p class="lead">${d.sync_detail || ""}</p>`;
           show("result"); return;
         }
         alert(typeof d === "string" ? d : (d?.message || "Échec")); return;
       }
       $("res-score").textContent = `${data.score_raw}/20`;
       $("res-detail").textContent = `${data.correct_count}/${data.total_questions} · ${data.course_name}`;
-      $("res-sync").innerHTML = `<span class="tag tag-ok">synced</span><p class="lead">${data.sync_detail || ""}</p>`;
+      $("res-sync").innerHTML = `<span class="tag tag-ok">note enregistrée</span>`;
       show("result"); loadAttempts();
     });
     $("btn-logout").onclick = () => {

@@ -154,11 +154,11 @@
         <div class="seal">N</div>
         <div>
           <h1>Notara</h1>
-          <p>Cahier d’évaluations externe</p>
+          <p>Cahier d’évaluations</p>
         </div>
       </div>
       <div style="display:flex;gap:10px;align-items:center">
-        <span class="ribbon">Pas intégré à EduPulse</span>
+        <span class="ribbon">Espace élève</span>
         <div id="userbox" class="userbox">
           <div class="avatar" id="user-avatar">É</div>
           <div>
@@ -174,26 +174,26 @@
   <main>
     <section id="view-login" class="spread">
       <div class="sheet">
-        <h2>Une feuille à part,<br/>des notes qui voyagent.</h2>
+        <h2>Votre cahier<br/>d’évaluations.</h2>
         <p class="lead">
-          Notara est une 2ᵉ application externe (comme Pronote) : les élèves composent ici,
-          puis la note rejoint EduPulse via xAPI — sans partage d’interface avec le SaaS.
+          Connectez-vous, ouvrez une fiche de contrôle et répondez aux questions.
+          La note est calculée dès la remise de la copie.
         </p>
         <div class="stickers">
           <span class="sticker">QCM /20</span>
-          <span class="sticker">Auth établissement</span>
-          <span class="sticker">Sync LRS</span>
+          <span class="sticker">Correction auto</span>
+          <span class="sticker">Suivi des notes</span>
         </div>
       </div>
       <div class="sheet">
         <form id="login-form">
-          <label for="edupulse_url">URL du stack EduPulse</label>
+          <label for="edupulse_url">Adresse de l’établissement</label>
           <input id="edupulse_url" required placeholder="http://host.docker.internal:8101" />
-          <label for="email">Email élève</label>
+          <label for="email">Email scolaire</label>
           <input id="email" type="email" required placeholder="emma.bernard@demo.fr" />
           <label for="password">Mot de passe</label>
           <input id="password" type="password" required placeholder="Demo123!" />
-          <button class="btn btn-primary" type="submit">Ouvrir mon cahier</button>
+          <button class="btn btn-primary" type="submit">Se connecter</button>
           <div id="login-error" class="msg"></div>
           <div id="login-ok" class="msg"></div>
         </form>
@@ -204,20 +204,20 @@
       <div class="section-head">
         <div>
           <h2>Évaluations du jour</h2>
-          <p class="lead" style="margin:0">Choisissez une fiche. Correction + envoi automatiques.</p>
+          <p class="lead" style="margin:0">Choisissez une fiche. La correction est automatique.</p>
         </div>
         <button class="btn btn-soft" id="btn-refresh" type="button">Actualiser</button>
       </div>
       <div id="quiz-grid" class="grid"></div>
       <div class="section-head" style="margin-top:28px">
         <div>
-          <h2>Carnet d’envois</h2>
-          <p class="lead" style="margin:0">Historique Notara → EduPulse.</p>
+          <h2>Mes notes</h2>
+          <p class="lead" style="margin:0">Historique de vos remises.</p>
         </div>
       </div>
       <div class="sheet" style="overflow:auto">
         <table>
-          <thead><tr><th>Date</th><th>Matière</th><th>Note</th><th>Sync</th></tr></thead>
+          <thead><tr><th>Date</th><th>Matière</th><th>Note</th><th>Statut</th></tr></thead>
           <tbody id="attempts-body"><tr><td colspan="4" style="color:var(--soft)">Aucune tentative.</td></tr></tbody>
         </table>
       </div>
@@ -247,7 +247,7 @@
       </div>
     </section>
   </main>
-  <footer>Notara et Evalio sont deux apps tierces distinctes. EduPulse reste le SaaS Learning Analytics.</footer>
+  <footer>© 2026 Notara — Cahier d’évaluations</footer>
 
   <script>
     const state = {
@@ -297,7 +297,7 @@
           <td>${r.created_at ? new Date(r.created_at).toLocaleString("fr-FR") : "—"}</td>
           <td>${r.course_name}</td>
           <td><strong>${r.score_raw} / 20</strong></td>
-          <td><span class="tag ${ok ? "tag-ok" : "tag-err"}">${ok ? "Synchronisé" : r.sync_status}</span></td>
+          <td><span class="tag ${ok ? "tag-ok" : "tag-err"}">${ok ? "Enregistré" : "Erreur"}</span></td>
         </tr>`;
       }).join("");
     }
@@ -313,7 +313,7 @@
           ${q.choices.map((c,idx) => `
             <label class="choice"><input type="radio" name="${q.id}" value="${idx}" required /><span>${c}</span></label>
           `).join("")}
-        </div>`).join("") + `<button class="btn btn-primary" type="submit">Rendre la copie & envoyer à EduPulse</button>`;
+        </div>`).join("") + `<button class="btn btn-primary" type="submit">Rendre la copie</button>`;
       show("quiz");
     }
     $("login-form").addEventListener("submit", async (e) => {
@@ -355,14 +355,14 @@
         if (d && typeof d === "object" && d.score_raw != null) {
           $("res-score").textContent = `${d.score_raw} / 20`;
           $("res-detail").textContent = `${d.correct_count}/${d.total_questions} bonnes réponses`;
-          $("res-sync").innerHTML = `<span class="tag tag-err">Échec sync</span><p class="lead">${d.sync_detail || ""}</p>`;
+          $("res-sync").innerHTML = `<span class="tag tag-err">Enregistrement incomplet</span><p class="lead">${d.sync_detail || ""}</p>`;
           show("result"); return;
         }
         alert(typeof d === "string" ? d : (d?.message || "Échec")); return;
       }
       $("res-score").textContent = `${data.score_raw} / 20`;
       $("res-detail").textContent = `${data.correct_count}/${data.total_questions} · ${data.course_name}`;
-      $("res-sync").innerHTML = `<span class="tag tag-ok">Synchronisé</span><p class="lead">${data.sync_detail || ""}</p>`;
+      $("res-sync").innerHTML = `<span class="tag tag-ok">Note enregistrée</span>`;
       show("result"); loadAttempts();
     });
     $("btn-logout").onclick = () => {

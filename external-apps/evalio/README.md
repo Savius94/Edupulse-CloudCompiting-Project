@@ -1,13 +1,11 @@
-# Evalio — borne externe d’évaluations
+# Evalio
 
-Application **indépendante** d’EduPulse (esprit Pronote).  
-UI « scantron / machine à examens ». Sync des notes via **xAPI**.
+Borne d’évaluations scolaires (QCM /20).
 
 ```powershell
 docker compose up -d --build
 ```
 
-Ouvrir : **http://localhost:8240**
+http://localhost:8240
 
-- URL EduPulse : `http://host.docker.internal:8101`
-- Élève : `lucas.martin@demo.fr` / `Demo123!`
+Identifiants de démo : voir `../TEST_ACCOUNTS.md`

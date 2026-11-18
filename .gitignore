@@ -32,6 +32,7 @@ ENV/
 
 # External assessment apps (local SQLite)
 external-apps/**/data/
+external-apps/seed_results.json
 *.db
 
 # Operating System & IDE
