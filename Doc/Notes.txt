@@ -2,6 +2,10 @@ MDP:
 direction@lycee-moulin.fr  ClientPass123!
 superadmin@edupulse.mnbll.fr  SuperSecretPassword123!
 
+Graphana:
+reset admin:admin
+config admin:admin12367
+
 admin sub:
 yoanminbielle@gmail.com AzerTY123
 profs : Demo123!
@@ -11,7 +15,7 @@ Todo:
 - Obtenire plus d'infos sur le systeme dans le panel admin
 - verifier le focntionnment et en apprendre plsu sur le focntionnement
 - Ajouter un boutton pour aceder a l'interface d'admin de stack pour les user sans devois se reconnecter a chaque fois (ou laisser comme ca)
-
+²
 Fait:
 - Saisie des notes à 2 décimales (step="0.01" de .01 à .99) dans l'interface Étudiant et dans le backend xAPI
 - Configuration domaine officiel edupulse.mnbll.fr et wildcard *.edupulse.mnbll.fr avec routage dynamique Traefik
