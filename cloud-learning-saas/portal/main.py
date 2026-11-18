@@ -168,6 +168,86 @@ def set_simulated_cpu_override(cpu_val: Optional[float], db: Optional[Session] =
             db.close()
 
 
+def _normalize_gemini_model(model: Optional[str]) -> str:
+    m = (model or "").strip().strip('"').strip("'")
+    return m or "gemini-3.5-flash-lite"
+
+
+def get_ai_settings(db: Optional[Session] = None) -> Dict[str, str]:
+    """
+    Récupère la clé API et le modèle IA actifs pour le cluster :
+    - Priorité 1 : valeur saisie dans la console Manager (CloudSetting, partagée entre réplicas)
+    - Priorité 2 : variables GEMINI_API_KEY / GEMINI_MODEL issues du .env Manager
+    """
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    env_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+    env_model = _normalize_gemini_model(os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"))
+    db_key = ""
+    db_model = ""
+    try:
+        rows = db.query(CloudSetting).filter(CloudSetting.key.in_(["gemini_api_key", "gemini_model"])).all()
+        settings_map = {r.key: (r.value or "").strip() for r in rows}
+        db_key = settings_map.get("gemini_api_key", "").strip().strip('"').strip("'")
+        db_model = settings_map.get("gemini_model", "").strip()
+    except Exception:
+        pass
+    finally:
+        if close_db:
+            db.close()
+
+    if db_key:
+        return {
+            "api_key": db_key,
+            "model": _normalize_gemini_model(db_model or env_model),
+            "source": "console_manager",
+        }
+    if env_key:
+        return {
+            "api_key": env_key,
+            "model": _normalize_gemini_model(db_model or env_model),
+            "source": "env_manager",
+        }
+    return {
+        "api_key": "",
+        "model": _normalize_gemini_model(db_model or env_model),
+        "source": "simulation",
+    }
+
+
+def set_ai_settings(api_key: Optional[str], model: Optional[str], db: Optional[Session] = None):
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        updates = {}
+        if api_key is not None:
+            updates["gemini_api_key"] = api_key.strip().strip('"').strip("'")
+        if model is not None:
+            updates["gemini_model"] = _normalize_gemini_model(model)
+        for k, v in updates.items():
+            row = db.query(CloudSetting).filter(CloudSetting.key == k).first()
+            if not row:
+                db.add(CloudSetting(key=k, value=v))
+            else:
+                row.value = v
+        db.commit()
+    finally:
+        if close_db:
+            db.close()
+
+
+def mask_api_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 10:
+        return "*" * len(key)
+    return f"{key[:6]}...{key[-4:]}"
+
+
 def record_cloud_event(pillar: str, slug: str, message: str, cpu_pct: Optional[float] = None, db: Optional[Session] = None):
     """Enregistre un événement d'orchestration Swarm en base de données (partagé entre réplicas)."""
     close_db = False
@@ -295,6 +375,12 @@ class ChangePlanRequest(BaseModel):
 
 class SimulateLoadRequest(BaseModel):
     cpu_load: Optional[float] = None
+
+
+class AIConfigRequest(BaseModel):
+    api_key: Optional[str] = None
+    model: Optional[str] = "gemini-3.5-flash-lite"
+    clear_override: bool = False
 
 
 # =============================================================================
@@ -495,11 +581,16 @@ def orchestrate_tenant_stack(
     for proxy_var in [
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
         "http_proxy", "https_proxy", "no_proxy",
-        "GEMINI_API_KEY", "GEMINI_MODEL"
     ]:
         val = os.getenv(proxy_var)
         if val:
             env[proxy_var] = val
+
+    ai_cfg = get_ai_settings()
+    ai_key = ai_cfg["api_key"]
+    ai_model = ai_cfg["model"]
+    env["GEMINI_API_KEY"] = ai_key
+    env["GEMINI_MODEL"] = ai_model
 
     # -------------------------------------------------------------------------
     # MODE 1 : ORCHESTRATION NATIVE DOCKER SWARM (docker stack / docker service)
@@ -520,8 +611,9 @@ def orchestrate_tenant_stack(
             .replace("${ADMIN_PASSWORD_HASH}", safe_hash)
             .replace("${ADMIN_FULL_NAME:-Administrateur Principal}", (admin_name or "Administrateur Principal").replace('"', '\\"'))
             .replace("${JWT_SECRET:-super-secret-tenant-key}", env.get("JWT_SECRET", "super-secret-tenant-key"))
-            .replace("${GEMINI_API_KEY:-}", env.get("GEMINI_API_KEY", ""))
-            .replace("${GEMINI_MODEL:-gemini-3.5-flash-lite}", env.get("GEMINI_MODEL", "gemini-3.5-flash-lite"))
+            .replace("${GEMINI_API_KEY:-}", ai_key)
+            .replace("${GEMINI_MODEL:-gemini-3.5-flash-lite}", ai_model)
+            .replace("${GEMINI_MODEL:-gemini-2.5-flash-lite}", ai_model)
             .replace("${HTTP_PROXY:-}", env.get("HTTP_PROXY", ""))
             .replace("${HTTPS_PROXY:-}", env.get("HTTPS_PROXY", ""))
             .replace("${NO_PROXY:-}", env.get("NO_PROXY", ""))
@@ -579,6 +671,8 @@ def orchestrate_tenant_stack(
                 "docker", "service", "update",
                 "--force",
                 "--image", TENANT_IMAGE,
+                "--env-add", f"GEMINI_API_KEY={ai_key}",
+                "--env-add", f"GEMINI_MODEL={ai_model}",
                 "--update-parallelism", "1",
                 "--update-delay", "3s",
                 "--update-order", "start-first",
@@ -1114,6 +1208,143 @@ def sa_simulate_load(
         "simulated_cpu": payload.cpu_load,
         "evaluation": eval_res,
         "events": get_recent_cloud_events(db, 15),
+    }
+
+
+def propagate_ai_config_to_workers(ai_key: str, ai_model: str, db: Session) -> Dict[str, Any]:
+    """Diffuse GEMINI_API_KEY et GEMINI_MODEL aux stacks tenants déjà déployés sur les Workers."""
+    updated_services: List[str] = []
+    errors: List[str] = []
+
+    if is_swarm_active():
+        try:
+            ls_res = subprocess.run(
+                ["docker", "service", "ls", "--format", "{{.Name}}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            services = [
+                line.strip()
+                for line in (ls_res.stdout or "").splitlines()
+                if line.strip().endswith("_tenant-app")
+            ]
+        except Exception as exc:
+            services = []
+            errors.append(f"Impossible de lister les services Swarm : {exc}")
+
+        for svc in services:
+            try:
+                upd = subprocess.run(
+                    [
+                        "docker", "service", "update", "-d",
+                        "--env-add", f"GEMINI_API_KEY={ai_key}",
+                        "--env-add", f"GEMINI_MODEL={ai_model}",
+                        svc,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if upd.returncode == 0:
+                    updated_services.append(svc)
+                else:
+                    errors.append(f"{svc}: {(upd.stderr or upd.stdout).strip()}")
+            except Exception as exc:
+                errors.append(f"{svc}: {exc}")
+    else:
+        running_tenants = db.query(TenantStack).filter(TenantStack.status == "RUNNING").all()
+        for t in running_tenants:
+            owner = t.owner
+            try:
+                orchestrate_tenant_stack(
+                    action="up",
+                    slug=t.slug,
+                    tenant_id=t.id,
+                    institution_name=t.institution_name,
+                    plan_max_users=t.plan_max_users,
+                    admin_email=owner.email if owner else "",
+                    admin_password_hash=owner.password_hash if owner else "",
+                    admin_name=owner.full_name if owner else "",
+                    replicas=t.replicas or 1,
+                )
+                updated_services.append(t.slug)
+            except Exception as exc:
+                errors.append(f"{t.slug}: {exc}")
+
+    return {"updated_services": updated_services, "errors": errors}
+
+
+@app.get("/api/superadmin/ai-config")
+def sa_get_ai_config(
+    _: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    cfg = get_ai_settings(db)
+    env_key_present = bool(os.getenv("GEMINI_API_KEY", "").strip())
+    return {
+        "configured": bool(cfg["api_key"]),
+        "masked_key": mask_api_key(cfg["api_key"]),
+        "model": cfg["model"],
+        "source": cfg["source"],
+        "env_key_present": env_key_present,
+    }
+
+
+@app.post("/api/superadmin/ai-config")
+def sa_update_ai_config(
+    payload: AIConfigRequest,
+    _: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """
+    Configure la clé API IA et le modèle sur le Manager (portal_db) puis les diffuse
+    immédiatement à tous les Workers / établissements déployés.
+    """
+    if payload.clear_override:
+        set_ai_settings(api_key="", model=payload.model or "gemini-3.5-flash-lite", db=db)
+    else:
+        api_key_val = payload.api_key if payload.api_key is not None else None
+        set_ai_settings(api_key=api_key_val, model=payload.model, db=db)
+
+    cfg = get_ai_settings(db)
+    sync_res = propagate_ai_config_to_workers(cfg["api_key"], cfg["model"], db)
+    state_label = "activée" if cfg["api_key"] else "désactivée (mode simulation)"
+    record_cloud_event(
+        "SWARM",
+        "ai-config",
+        f"Configuration IA {state_label} ({cfg['model']}, source={cfg['source']}) diffusée à {len(sync_res['updated_services'])} service(s) Worker.",
+        db=db,
+    )
+    return {
+        "configured": bool(cfg["api_key"]),
+        "masked_key": mask_api_key(cfg["api_key"]),
+        "model": cfg["model"],
+        "source": cfg["source"],
+        "sync": sync_res,
+    }
+
+
+@app.post("/api/superadmin/ai-config/sync-workers")
+def sa_sync_ai_to_workers(
+    _: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """Force la propagation de la clé API IA active (depuis .env ou BDD) vers tous les Workers existants."""
+    cfg = get_ai_settings(db)
+    sync_res = propagate_ai_config_to_workers(cfg["api_key"], cfg["model"], db)
+    record_cloud_event(
+        "SWARM",
+        "ai-config",
+        f"Synchronisation IA ({cfg['model']}, clé={'OUI' if cfg['api_key'] else 'NON'}) envoyée à {len(sync_res['updated_services'])} service(s) Worker.",
+        db=db,
+    )
+    return {
+        "configured": bool(cfg["api_key"]),
+        "masked_key": mask_api_key(cfg["api_key"]),
+        "model": cfg["model"],
+        "source": cfg["source"],
+        "sync": sync_res,
     }
 
 

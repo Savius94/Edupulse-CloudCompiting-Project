@@ -554,6 +554,44 @@
         </div>
       </div>
 
+      <!-- Configuration IA Pédagogique (Clé API sur le Manager & Diffusion Workers) -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 space-y-3">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-base font-bold text-slate-900">Configuration IA Pédagogique (Diffusion Manager → Workers)</h2>
+              <span id="sa-ai-status-badge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                Vérification...
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Définissez la clé API Gemini depuis le Manager ou propagez la clé issue du fichier <code class="bg-slate-100 px-1 rounded">.env</code> vers tous les établissements actifs sur les Workers.
+              Les données transmises lors des analyses sont strictement anonymisées (sans nom ni email d'élève).
+            </p>
+          </div>
+          <button onclick="saSyncAiWorkers(this)" class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 cursor-pointer">
+            🔄 Diffuser config active aux Workers
+          </button>
+        </div>
+
+        <form onsubmit="saSaveAiConfig(event)" class="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+          <input id="sa-ai-key" type="password" autocomplete="off" placeholder="Clé API Gemini (laisser vide pour garder l'actuelle ou utiliser .env)"
+            class="sm:col-span-2 px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+          <input id="sa-ai-model" type="text" value="gemini-3.5-flash-lite" placeholder="Modèle (ex: gemini-3.5-flash-lite)"
+            class="px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+          <div class="flex items-center gap-2">
+            <button type="submit" class="flex-1 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer">
+              💾 Enregistrer & Diffuser
+            </button>
+            <button type="button" onclick="saClearAiOverride()" title="Revenir à la valeur du fichier .env"
+              class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer">
+              ↩️ .env
+            </button>
+          </div>
+        </form>
+        <div id="sa-ai-feedback" class="hidden text-xs p-2.5 rounded-xl border font-medium"></div>
+      </div>
+
       <!-- Création rapide d'un Stack par le Super-Admin -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
@@ -1145,11 +1183,17 @@
     // Super-Admin Global
     async function refreshSuperAdmin() {
       try {
-        const [vmRes, tenantsRes, usersRes] = await Promise.all([
+        const [vmRes, tenantsRes, usersRes, aiRes] = await Promise.all([
           fetch('/api/superadmin/vm-stats', { headers: { 'Authorization': `Bearer ${token}` } }),
           fetch('/api/superadmin/tenants', { headers: { 'Authorization': `Bearer ${token}` } }),
-          fetch('/api/superadmin/users', { headers: { 'Authorization': `Bearer ${token}` } })
+          fetch('/api/superadmin/users', { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch('/api/superadmin/ai-config', { headers: { 'Authorization': `Bearer ${token}` } })
         ]);
+
+        if (aiRes && aiRes.ok) {
+          const aiCfg = await aiRes.json();
+          updateSuperAdminAiBadge(aiCfg);
+        }
 
         if (vmRes.status === 401 || tenantsRes.status === 401) {
           logout();
@@ -1461,6 +1505,94 @@
         headers: { 'Authorization': `Bearer ${token}` }
       });
       refreshSuperAdmin();
+    }
+
+    function updateSuperAdminAiBadge(aiCfg) {
+      const badge = document.getElementById('sa-ai-status-badge');
+      const modelInput = document.getElementById('sa-ai-model');
+      if (modelInput && aiCfg.model && document.activeElement !== modelInput) {
+        modelInput.value = aiCfg.model;
+      }
+      if (!badge) return;
+      if (aiCfg.configured) {
+        const srcLabel = aiCfg.source === 'console_manager' ? 'Console Manager' : '.env Manager';
+        badge.textContent = `● Clé active (${srcLabel} : ${aiCfg.masked_key}) • ${aiCfg.model}`;
+        badge.className = 'text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700';
+      } else {
+        badge.textContent = `○ Aucune clé active (Mode simulation) • ${aiCfg.model}`;
+        badge.className = 'text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800';
+      }
+    }
+
+    function showAiFeedback(msg, isError = false) {
+      const fb = document.getElementById('sa-ai-feedback');
+      if (!fb) return;
+      fb.textContent = msg;
+      fb.className = isError
+        ? 'text-xs p-2.5 rounded-xl border bg-rose-50 border-rose-200 text-rose-700 font-medium'
+        : 'text-xs p-2.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 font-medium';
+      fb.classList.remove('hidden');
+    }
+
+    async function saSaveAiConfig(e) {
+      e.preventDefault();
+      const keyVal = document.getElementById('sa-ai-key').value.trim();
+      const modelVal = document.getElementById('sa-ai-model').value.trim() || 'gemini-3.5-flash-lite';
+      const payload = { model: modelVal };
+      if (keyVal) payload.api_key = keyVal;
+
+      const res = await fetch('/api/superadmin/ai-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAiFeedback(data.detail || 'Erreur lors de la sauvegarde IA.', true);
+        return;
+      }
+      document.getElementById('sa-ai-key').value = '';
+      updateSuperAdminAiBadge(data);
+      const count = (data.sync && data.sync.updated_services) ? data.sync.updated_services.length : 0;
+      const errCount = (data.sync && data.sync.errors) ? data.sync.errors.length : 0;
+      showAiFeedback(`✓ Configuration enregistrée (${data.model}) et diffusée à ${count} service(s) Worker${errCount ? ` (${errCount} avertissement(s))` : ''}.`);
+      refreshSuperAdmin();
+    }
+
+    async function saClearAiOverride() {
+      const modelVal = document.getElementById('sa-ai-model').value.trim() || 'gemini-3.5-flash-lite';
+      const res = await fetch('/api/superadmin/ai-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ clear_override: true, model: modelVal })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        updateSuperAdminAiBadge(data);
+        const count = (data.sync && data.sync.updated_services) ? data.sync.updated_services.length : 0;
+        showAiFeedback(`✓ Revenu à la configuration du .env Manager (${data.configured ? 'clé détectée' : 'aucune clé dans .env'}) et synchronisé sur ${count} Worker(s).`);
+        refreshSuperAdmin();
+      }
+    }
+
+    async function saSyncAiWorkers(btnEl) {
+      const orig = btnEl ? btnEl.textContent : '';
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Diffusion...'; }
+      try {
+        const res = await fetch('/api/superadmin/ai-config/sync-workers', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (res.ok) {
+          updateSuperAdminAiBadge(data);
+          const count = (data.sync && data.sync.updated_services) ? data.sync.updated_services.length : 0;
+          showAiFeedback(`✓ Clé et modèle (${data.model}) propagés vers ${count} service(s) Worker.`);
+          refreshSuperAdmin();
+        }
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig; }
+      }
     }
 
     async function clientDeleteTenant(slug) {

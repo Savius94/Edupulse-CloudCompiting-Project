@@ -4,9 +4,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ -f .env ]; then
+  TMP_ENV=$(mktemp)
+  tr -d '\r' < .env > "$TMP_ENV"
   set -a
-  source .env
+  # shellcheck disable=SC1090
+  source "$TMP_ENV"
   set +a
+  rm -f "$TMP_ENV"
+fi
+
+if [ -z "${GEMINI_MODEL:-}" ]; then
+  GEMINI_MODEL="gemini-3.5-flash-lite"
+  export GEMINI_MODEL
 fi
 
 REGISTRY_HOST="${REGISTRY_HOST:-100.85.14.115:5000}"
@@ -37,7 +46,23 @@ docker build -t "${REGISTRY_HOST}/edupulse-tenant-app:latest" ./tenant-stack
 docker push "${REGISTRY_HOST}/edupulse-tenant-app:latest"
 
 echo "=== 5. Déploiement / Mise à jour sans coupure (Rolling Update) sur les Workers ==="
-docker service update --force --with-registry-auth --image "${REGISTRY_HOST}/edupulse-portal-api:latest" edupulse_portal-api || true
+docker service update --force --with-registry-auth \
+  --image "${REGISTRY_HOST}/edupulse-portal-api:latest" \
+  --env-add "GEMINI_API_KEY=${GEMINI_API_KEY:-}" \
+  --env-add "GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}" \
+  edupulse_portal-api || true
+
+if [ -n "${GEMINI_API_KEY:-}" ]; then
+  echo "=== 5b. Propagation de la clé API IA aux établissements déjà déployés sur les Workers ==="
+  for svc in $(docker service ls --format '{{.Name}}' | grep '_tenant-app$' || true); do
+    echo " -> Mise à jour des variables IA pour $svc..."
+    docker service update -d --with-registry-auth \
+      --image "${REGISTRY_HOST}/edupulse-tenant-app:latest" \
+      --env-add "GEMINI_API_KEY=${GEMINI_API_KEY}" \
+      --env-add "GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}" \
+      "$svc" >/dev/null || true
+  done
+fi
 
 echo "=== 6. État du Cluster Swarm ==="
 docker node ls

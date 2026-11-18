@@ -35,8 +35,8 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@ecole.fr")
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "Administrateur Principal")
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-tenant-key")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-2.5-flash-lite"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip().strip('"').strip("'") or "gemini-3.5-flash-lite"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -236,8 +236,8 @@ def build_gemini_coaching_prompt(
     records: List[XAPIStatementRecord],
 ) -> str:
     """
-    Construit le prompt pédagogique envoyé au modèle d'IA en injectant en variables
-    le profil de l'étudiant et le détail de ses notes.
+    Construit le prompt pédagogique anonymisé envoyé au modèle d'IA en injectant
+    les indicateurs de l'étudiant sans aucune donnée nominative (RGPD).
     """
     course_scores: Dict[str, List[float]] = {}
     for r in records:
@@ -253,12 +253,14 @@ def build_gemini_coaching_prompt(
         for r in recent_records
     ]
 
+    anon_id = f"ETU-{student.id:03d}"
     student_class = getattr(student, "class_name", "Générale") or "Générale"
     prompt = (
-        f"Tu es un conseiller pédagogique expert en Learning Analytics pour l'établissement « {INSTITUTION_NAME} ».\n"
-        f"Rédige une recommandation de coaching pédagogique personnalisée destinée à l'enseignant pour l'aider à accompagner son étudiant.\n\n"
-        f"=== VARIABLES ÉTUDIANT ===\n"
-        f"- Nom complet : {student.full_name}\n"
+        "Tu es un conseiller pédagogique expert en Learning Analytics pour un établissement d'enseignement supérieur.\n"
+        "Rédige une recommandation de coaching pédagogique personnalisée destinée à l'enseignant pour l'aider à accompagner cet apprenant.\n"
+        "CONFIDENTIALITÉ : Les données ci-dessous sont strictement anonymisées (aucun nom, prénom ou email n'est transmis).\n\n"
+        f"=== VARIABLES ÉTUDIANT (ANONYMISÉ) ===\n"
+        f"- Identifiant anonyme : {anon_id}\n"
         f"- Promotion / Classe : {student_class}\n"
         f"- Moyenne générale : {alert.average_score}/20 (sur {alert.statements_count} notes)\n"
         f"- Évolution récente : {alert.recent_trend:+.2f} pt(s)\n"
@@ -271,14 +273,15 @@ def build_gemini_coaching_prompt(
         + "\n\n=== CONSIGNE DE RÉDACTION ===\n"
         "Rédige une analyse concise et directe en 3 à 4 phrases (en français, ton professionnel et bienveillant destiné au professeur). "
         "Synthétise la trajectoire de l'élève en citant ses chiffres clés et propose 2 actions concrètes de coaching à mettre en place dès cette semaine. "
-        "Important : Ne commence PAS par des formules de politesse ou de salutation (pas de 'Bonjour', 'Cher enseignant', etc.), entre directement dans le diagnostic pédagogique."
+        "Important : Ne commence PAS par des formules de politesse ou de salutation (pas de 'Bonjour', 'Cher enseignant', etc.), entre directement dans le diagnostic pédagogique. "
+        "Désigne l'apprenant simplement par « cet étudiant » ou « l'étudiant » (n'invente aucun nom)."
     )
     return prompt
 
 
 def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
     """
-    Génère une recommandation de coaching pédagogique via l'IA pour un étudiant donné
+    Génère une recommandation de coaching pédagogique anonymisée via l'IA pour un étudiant donné
     et sauvegarde le conseil ainsi que le prompt et la réponse brute en base.
     """
     recompute_student_analytics(db, student.id)
@@ -302,6 +305,7 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
         }
 
     prompt = build_gemini_coaching_prompt(student, alert, records)
+    anon_id = f"ETU-{student.id:03d}"
     coaching_text = ""
     raw_response_str = ""
     source = "simulation"
@@ -350,15 +354,17 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
                 raw_response_str = json.dumps({
                     "status_code": http_err.code,
                     "reason": http_err.reason,
+                    "model_used": GEMINI_MODEL,
                     "error_body": json.loads(err_body) if err_body.startswith("{") else err_body,
                 }, indent=2, ensure_ascii=False)
             except Exception:
-                raw_response_str = f"HTTP Error {http_err.code}: {http_err.reason}"
+                raw_response_str = f"HTTP Error {http_err.code} ({GEMINI_MODEL}): {http_err.reason}"
             source = f"simulation (erreur HTTP {http_err.code})"
         except Exception as exc:
             raw_response_str = json.dumps({
                 "error": str(exc),
                 "type": type(exc).__name__,
+                "model_used": GEMINI_MODEL,
             }, indent=2, ensure_ascii=False)
             source = f"simulation (secours: {type(exc).__name__})"
 
@@ -377,7 +383,7 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
 
         if alert.risk_level == "CRITIQUE":
             coaching_text = (
-                f"Alerte de décrochage prononcée pour {student.full_name} ({student_class}) avec une moyenne globale de {alert.average_score}/20 "
+                f"Alerte de décrochage prononcée pour cet étudiant ({anon_id}, {student_class}) avec une moyenne globale de {alert.average_score}/20 "
                 f"(évolution récente de {alert.recent_trend:+.2f} pts, dernière note à {last_rec.score_raw}/20 en {last_rec.course_name}) "
                 f"et une lacune critique en {weakest_course} ({weakest_avg}/20). "
                 f"Actions de coaching recommandées : (1) planifier un entretien individuel de remédiation cette semaine en s'appuyant sur "
@@ -386,14 +392,14 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
             )
         elif alert.risk_level == "VIGILANCE":
             coaching_text = (
-                f"Profil en zone de vigilance pour {student.full_name} ({student_class}) (moyenne {alert.average_score}/20, dynamique récente de {alert.recent_trend:+.2f} pts) "
+                f"Profil en zone de vigilance pour cet étudiant ({anon_id}, {student_class}) (moyenne {alert.average_score}/20, dynamique récente de {alert.recent_trend:+.2f} pts) "
                 f"marqué par un écart entre {best_course} ({best_avg}/20) et {weakest_course} ({weakest_avg}/20, dernière note : {last_rec.score_raw}/20 en {last_rec.course_name}). "
-                f"Actions de coaching recommandées : (1) proposer à {student.full_name} une fiche d'entraînement ciblée sur {weakest_course} "
+                f"Actions de coaching recommandées : (1) proposer à cet étudiant une fiche d'entraînement ciblée sur {weakest_course} "
                 f"avant la prochaine évaluation ; (2) faire un point méthodologique de 10 minutes en fin de séance pour consolider les notions clés."
             )
         else:
             coaching_text = (
-                f"Excellente maîtrise globale pour {student.full_name} ({student_class}) ({alert.average_score}/20 sur {alert.statements_count} évaluations, tendance {alert.recent_trend:+.2f} pts), "
+                f"Excellente maîtrise globale pour cet étudiant ({anon_id}, {student_class}) ({alert.average_score}/20 sur {alert.statements_count} évaluations, tendance {alert.recent_trend:+.2f} pts), "
                 f"portée par de très bons résultats en {best_course} ({best_avg}/20) et une dernière note de {last_rec.score_raw}/20 en {last_rec.course_name}. "
                 f"Actions de coaching recommandées : (1) valoriser sa régularité et lui proposer un sujet d'approfondissement ou défi avancé en {best_course} ; "
                 f"(2) consolider {weakest_course} ({weakest_avg}/20) ou l'inviter à parrainer un camarade de promotion."
@@ -402,8 +408,10 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
         if not raw_response_str:
             raw_response_str = json.dumps({
                 "statut": "simulation_locale_active",
-                "message": "Génération pédagogique locale basée sur les notes et les variables du prompt.",
-                "etudiant": student.full_name,
+                "cle_api_presente": bool(GEMINI_API_KEY),
+                "modele_configure": GEMINI_MODEL,
+                "message": "Génération pédagogique locale anonymisée basée sur les notes et les variables du prompt.",
+                "id_anonyme": anon_id,
                 "classe": student_class,
                 "moyenne": alert.average_score,
                 "matiere_fragile": weakest_course,

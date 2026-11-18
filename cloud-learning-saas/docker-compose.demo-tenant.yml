@@ -27,8 +27,8 @@ services:
       ADMIN_PASSWORD_HASH: ""
       ADMIN_FULL_NAME: "Direction Demo"
       JWT_SECRET: local_demo_tenant_jwt
-      GEMINI_API_KEY: ""
-      GEMINI_MODEL: gemini-3.5-flash-lite
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-3.5-flash-lite}"
     ports:
       - "8101:8000"
     depends_on:
