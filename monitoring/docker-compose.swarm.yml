@@ -1,0 +1,116 @@
+version: "3.8"
+
+# Stack observabilité Docker Swarm (Manager + Workers) : Promtail (global) → Loki → Grafana
+# - Promtail tourne en mode `global` sur CHAQUE nœud Swarm (Manager + tous les Workers)
+# - Loki + Grafana tournent sur le Manager avec stockage persistant
+# - Grafana est exposé via Traefik sur http://grafana.edupulse.mnbll.fr (réseau saas-public-net)
+
+configs:
+  promtail_config_v1:
+    file: ./promtail-config.yml
+
+services:
+  loki:
+    image: grafana/loki:3.0.0
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - monitoring
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 384M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    command: -config.file=/etc/promtail/promtail-config.yml
+    configs:
+      - source: promtail_config_v1
+        target: /etc/promtail/promtail-config.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks:
+      - monitoring
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.20"
+          memory: 128M
+        reservations:
+          cpus: "0.02"
+          memory: 32M
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/edupulse-logs.json
+      GF_SERVER_ROOT_URL: http://grafana.${BASE_DOMAIN:-edupulse.mnbll.fr}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - target: 3000
+        published: 3002
+        protocol: tcp
+        mode: host
+    networks:
+      - monitoring
+      - saas-public-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=saas-public-net"
+        - "traefik.http.routers.grafana.rule=Host(`grafana.${BASE_DOMAIN:-edupulse.mnbll.fr}`) || Host(`grafana.localhost`)"
+        - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+networks:
+  saas-public-net:
+    external: true
+    name: saas-public-net
+  monitoring:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      com.docker.network.driver.mtu: "1200"
+
+volumes:
+  loki_data:
+  grafana_data:

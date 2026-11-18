@@ -1011,7 +1011,7 @@ def create_tenant_stack(
             status_code=400,
             detail="L'identifiant d'accès doit contenir au moins 2 caractères (ex: uppa, school1).",
         )
-    if slug in {"www", "api", "admin", "traefik", "portal", "mail"}:
+    if slug in {"www", "api", "admin", "traefik", "portal", "mail", "grafana", "loki"}:
         raise HTTPException(status_code=400, detail="Ce sous-domaine système est réservé.")
 
     if payload.plan_max_users not in ALLOWED_PLANS:

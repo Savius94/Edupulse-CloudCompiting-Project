@@ -12,7 +12,7 @@
       "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
       "id": 1,
       "options": {
-        "content": "## Logs EduPulse\nTous les conteneurs Docker sont collectés via **Promtail → Loki**.\nFiltres utiles : `container`, `compose_project`, `compose_service`, `stack`.\nExemples : `{container=~\".*portal.*\"}` · `{compose_project=\"evalio\"}` · `{compose_project=\"notara\"}` · `{compose_project=\"demo\"}`",
+        "content": "## Logs EduPulse\nTous les conteneurs Docker (Manager + Workers Swarm) sont collectés via **Promtail → Loki**.\nFiltres utiles : `container`, `swarm_service`, `swarm_stack`, `compose_project`, `stack`.\nExemples : `{swarm_service=~\".*portal.*\"}` · `{swarm_service=~\".*tenant-app.*\"}` · `{swarm_stack=\"demo\"}` · `{compose_project=\"evalio\"}`",
         "mode": "markdown"
       },
       "title": "Aide",
