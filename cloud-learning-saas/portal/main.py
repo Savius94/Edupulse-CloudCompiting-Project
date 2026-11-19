@@ -680,29 +680,20 @@ def orchestrate_tenant_stack(
             svc_name = f"{slug}_tenant-app"
             cmd = [
                 "docker", "service", "update",
-                "-d",
                 "--force",
-                "--with-registry-auth",
                 "--image", TENANT_IMAGE,
                 "--env-add", f"GEMINI_API_KEY={ai_key}",
                 "--env-add", f"GEMINI_MODEL={ai_model}",
-                "--env-add", f"MAINTENANCE_MODE={maint_flag}",
-                "--env-add", f"ROLLING_UPDATE_TS={int(time.time())}",
                 "--update-parallelism", "1",
-                "--update-delay", "2s",
+                "--update-delay", "3s",
                 "--update-order", "start-first",
                 svc_name
             ]
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             if res.returncode != 0:
                 deploy_cmd = ["docker", "stack", "deploy", "--resolve-image=never", "-c", str(rendered_stack_path), slug]
-                dep_res = subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
-                if dep_res.returncode != 0:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Erreur lors du Rolling Update : {res.stderr or dep_res.stderr or dep_res.stdout}",
-                    )
-                return {"executed": True, "mode": "SWARM_DEPLOY", "command": " ".join(deploy_cmd)}
+                subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
+                return {"executed": True, "mode": "SWARM", "command": " ".join(deploy_cmd)}
             return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
 
         elif action == "stop":
@@ -1576,7 +1567,7 @@ def notify_tenant_maintenance(tenant: TenantStack, enabled: bool, message: Optio
         except Exception:
             continue
 
-    if is_swarm_active():
+    if not delivered and is_swarm_active():
         try:
             subprocess.run(
                 [

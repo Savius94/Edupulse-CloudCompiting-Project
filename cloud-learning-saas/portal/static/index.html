@@ -1567,9 +1567,6 @@
     }
 
     async function saRollingUpdateTenant(slug, btnEl) {
-      if (!confirm(`Lancer un Rolling Update Zero-Downtime sur « ${slug} » ?\n\nLes conteneurs seront mis à jour un par un avec l'image actuelle (sans coupure de service).`)) {
-        return;
-      }
       const orig = btnEl ? btnEl.textContent : '';
       if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Update...'; }
       showStacksFeedback(`⏳ Rolling Update en cours sur « ${slug} »...`, 'info');
