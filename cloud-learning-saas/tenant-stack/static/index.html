@@ -6,6 +6,8 @@
   <title>Espace Établissement — EduPulse</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
 
@@ -274,10 +276,14 @@
       <div id="ai-coaching-global-feedback" class="hidden text-xs p-3.5 rounded-xl border font-medium"></div>
 
       <!-- Cartes de synthèse de la promotion -->
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
         <div class="bg-white p-5 rounded-2xl border border-slate-200">
-          <p class="text-xs text-slate-500">Moyenne de la classe</p>
+          <p class="text-xs text-slate-500">Moyenne actuelle</p>
           <p id="teach-avg" class="text-2xl font-extrabold text-slate-900 mt-1">-- / 20</p>
+        </div>
+        <div class="bg-indigo-50 p-5 rounded-2xl border border-indigo-200">
+          <p class="text-xs text-indigo-700 font-semibold">🔮 Moyenne estimée (M+1)</p>
+          <p id="teach-est-avg" class="text-2xl font-extrabold text-indigo-700 mt-1">-- / 20</p>
         </div>
         <div class="bg-rose-50 p-5 rounded-2xl border border-rose-200">
           <p class="text-xs text-rose-700 font-semibold">En décrochage (Critique)</p>
@@ -290,6 +296,61 @@
         <div class="bg-emerald-50 p-5 rounded-2xl border border-emerald-200">
           <p class="text-xs text-emerald-800 font-semibold">Progression régulière</p>
           <p id="teach-stab" class="text-2xl font-extrabold text-emerald-800 mt-1">0 élève(s)</p>
+        </div>
+      </div>
+
+      <!-- ================= BILAN IA DE LA CLASSE & RAPPORT PDF COMPLET PAR CLASSE ================= -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Synthèse & Export Pédagogique</span>
+              <span id="class-review-est-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                🔮 Estimation M+1 : -- / 20
+              </span>
+            </div>
+            <h3 class="text-lg font-bold text-slate-900 mt-0.5">Bilan IA global de la classe & Génération de Rapport PDF Complet</h3>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Sélectionnez une classe pour obtenir une analyse IA globale de la promotion ou télécharger un rapport PDF complet (incluant statistiques, commentaires IA et estimations futures de chaque élève).
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5 shrink-0">
+            <div class="flex items-center gap-1.5">
+              <label class="text-xs font-semibold text-slate-600">Classe :</label>
+              <select id="report-class-select" onchange="onReportClassSelectChange()" class="text-xs font-bold px-3 py-2 rounded-xl border border-slate-300 bg-white">
+                <option value="ALL">Toutes les promotions</option>
+              </select>
+            </div>
+            <button onclick="generateClassAIReview(this)"
+              class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition cursor-pointer inline-flex items-center gap-1.5">
+              <span>🧠 Obtenir la Review IA de la classe</span>
+            </button>
+            <button onclick="generateCompleteClassReportPDF(this)"
+              class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition cursor-pointer inline-flex items-center gap-1.5">
+              <span>📄 Télécharger Rapport PDF Complet</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="class-review-box" class="p-4 rounded-xl bg-indigo-50/60 border border-indigo-100 text-xs text-slate-700 leading-relaxed">
+          Cliquez sur <strong>« 🧠 Obtenir la Review IA de la classe »</strong> pour générer une synthèse pédagogique globale et une estimation de performance future pour la classe sélectionnée.
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+          <span id="class-review-meta">Données envoyées anonymisées (ETUD-XX) et personnalisées à la réception.</span>
+          <details id="class-review-debug" class="hidden text-[11px] text-slate-500 w-full mt-1">
+            <summary class="cursor-pointer hover:text-indigo-600 font-semibold">🔍 Voir le prompt anonymisé & la réponse brute du bilan de classe</summary>
+            <div class="mt-2 p-3 rounded-xl bg-slate-900 text-slate-200 text-[10px] space-y-2">
+              <div>
+                <p class="font-bold text-indigo-400 mb-1">📤 Prompt anonymisé envoyé :</p>
+                <pre id="class-review-prompt-pre" class="p-2 rounded bg-slate-950 text-indigo-200 whitespace-pre-wrap overflow-x-auto max-h-40 font-mono"></pre>
+              </div>
+              <div class="pt-2 border-t border-slate-800">
+                <p class="font-bold text-emerald-400 mb-1">📥 Réponse brute reçue :</p>
+                <pre id="class-review-raw-pre" class="p-2 rounded bg-slate-950 text-emerald-300 whitespace-pre-wrap overflow-x-auto max-h-44 font-mono"></pre>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -325,27 +386,34 @@
           </div>
         </div>
 
-        <!-- Onglets / Modes de visualisation -->
-        <div class="flex flex-wrap items-center gap-2">
-          <button onclick="setTeacherChartMode('compare')" id="btn-mode-compare"
-            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm">
-            <span>👥 Comparateur d'élèves</span>
-          </button>
-          <button onclick="setTeacherChartMode('class_trend')" id="btn-mode-class_trend"
-            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
-            <span>📈 Évolution moyenne classe</span>
-          </button>
-          <button onclick="setTeacherChartMode('single_student')" id="btn-mode-single_student"
-            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
-            <span>👤 Focus élève</span>
-          </button>
-          <button onclick="setTeacherChartMode('courses')" id="btn-mode-courses"
-            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
-            <span>📊 Moyennes par matière</span>
-          </button>
-          <button onclick="setTeacherChartMode('distribution')" id="btn-mode-distribution"
-            class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200">
-            <span>🎯 Distribution & Risques</span>
+        <!-- Onglets / Modes de visualisation + Bouton Courbe d'évolution estimée M+1 -->
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="setTeacherChartMode('compare')" id="btn-mode-compare"
+              class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm cursor-pointer">
+              <span>👥 Comparateur d'élèves</span>
+            </button>
+            <button onclick="setTeacherChartMode('class_trend')" id="btn-mode-class_trend"
+              class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer">
+              <span>📈 Évolution moyenne classe</span>
+            </button>
+            <button onclick="setTeacherChartMode('single_student')" id="btn-mode-single_student"
+              class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer">
+              <span>👤 Focus élève</span>
+            </button>
+            <button onclick="setTeacherChartMode('courses')" id="btn-mode-courses"
+              class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer">
+              <span>📊 Moyennes par matière</span>
+            </button>
+            <button onclick="setTeacherChartMode('distribution')" id="btn-mode-distribution"
+              class="teacher-mode-btn px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer">
+              <span>🎯 Distribution & Risques</span>
+            </button>
+          </div>
+
+          <button onclick="toggleFutureProjection()" id="btn-toggle-projection"
+            class="px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-indigo-600 text-white shadow-sm cursor-pointer">
+            <span>🔮 Projection M+1 (30j) : Activée</span>
           </button>
         </div>
 
@@ -429,7 +497,7 @@
             <thead>
               <tr class="border-b border-slate-200 text-xs uppercase text-slate-400">
                 <th class="py-3 px-2">Étudiant & Classe</th>
-                <th class="py-3 px-2">Moyenne & Dynamique</th>
+                <th class="py-3 px-2">Moyenne & Estimation M+1</th>
                 <th class="py-3 px-2">Diagnostic</th>
                 <th class="py-3 px-2">💡 Conseil Pédagogique IA <span class="text-[10px] text-slate-400 block font-normal font-sans">(Confidentiel Enseignant)</span></th>
                 <th class="py-3 px-2">💬 Votre Appréciation <span class="text-[10px] text-slate-400 block font-normal font-sans">(Transmise à l'Élève)</span></th>
@@ -1108,14 +1176,80 @@
     }
 
     // ================= LOGIQUE PAGE ENSEIGNANT, CONSEILS IA & APPRÉCIATIONS =================
+    let teacherAnalyticsData = null;
+    let showFutureProjection = true;
+
+    function toggleFutureProjection() {
+      showFutureProjection = !showFutureProjection;
+      const btn = document.getElementById('btn-toggle-projection');
+      if (btn) {
+        if (showFutureProjection) {
+          btn.className = 'px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-indigo-600 text-white shadow-sm cursor-pointer';
+          btn.innerHTML = '<span>🔮 Projection M+1 (30j) : Activée</span>';
+        } else {
+          btn.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer';
+          btn.innerHTML = '<span>🔮 Projection M+1 (30j) : Masquée</span>';
+        }
+      }
+      renderTeacherChart();
+    }
+
+    function onReportClassSelectChange() {
+      renderSavedClassReview();
+    }
+
+    function renderSavedClassReview() {
+      if (!teacherAnalyticsData) return;
+      const sel = document.getElementById('report-class-select');
+      const cls = sel ? sel.value : 'ALL';
+      const reviews = teacherAnalyticsData.class_reviews || {};
+      const rev = reviews[cls];
+      const box = document.getElementById('class-review-box');
+      const badge = document.getElementById('class-review-est-badge');
+      const meta = document.getElementById('class-review-meta');
+      const debugEl = document.getElementById('class-review-debug');
+      const promptPre = document.getElementById('class-review-prompt-pre');
+      const rawPre = document.getElementById('class-review-raw-pre');
+
+      if (rev && rev.review_text) {
+        box.textContent = rev.review_text;
+        box.className = 'p-4 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-wrap';
+        if (badge) {
+          badge.textContent = `🔮 Estimation M+1 : ${rev.estimated_class_future_avg !== null && rev.estimated_class_future_avg !== undefined ? rev.estimated_class_future_avg + ' / 20' : '-- / 20'}`;
+        }
+        if (meta) {
+          meta.textContent = rev.updated_at ? `Bilan IA généré le ${rev.updated_at} (données anonymisées ETUD-XX à l'envoi, personnalisées à l'affichage)` : '';
+        }
+        if (debugEl && (rev.prompt_used || rev.raw_response)) {
+          if (promptPre) promptPre.textContent = rev.prompt_used || '';
+          if (rawPre) rawPre.textContent = rev.raw_response || '';
+          debugEl.classList.remove('hidden');
+        }
+      } else {
+        const label = cls === 'ALL' ? 'toutes les promotions' : `la classe « ${cls} »`;
+        box.innerHTML = `Aucun bilan IA global enregistré pour <strong>${escapeHtml(label)}</strong>. Cliquez sur <strong>« 🧠 Obtenir la Review IA de la classe »</strong> ou téléchargez directement le <strong>Rapport PDF Complet</strong>.`;
+        box.className = 'p-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-xs text-slate-500 italic leading-relaxed';
+        if (badge) {
+          const fallbackEst = teacherAnalyticsData.summary ? teacherAnalyticsData.summary.estimated_future_class_average : '--';
+          badge.textContent = `🔮 Estimation M+1 : ${fallbackEst} / 20`;
+        }
+        if (debugEl) debugEl.classList.add('hidden');
+      }
+    }
+
     async function loadTeacherDashboard() {
       const res = await fetch('/api/teacher/analytics', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) return;
       const data = await res.json();
+      teacherAnalyticsData = data;
 
       document.getElementById('teach-avg').textContent = `${data.summary.class_average} / 20`;
+      const estAvgEl = document.getElementById('teach-est-avg');
+      if (estAvgEl) {
+        estAvgEl.textContent = `${data.summary.estimated_future_class_average !== undefined ? data.summary.estimated_future_class_average : '--'} / 20`;
+      }
       document.getElementById('teach-crit').textContent = `${data.summary.critical_count} élève(s)`;
       document.getElementById('teach-vig').textContent = `${data.summary.vigilance_count} élève(s)`;
       document.getElementById('teach-stab').textContent = `${data.summary.stable_count} élève(s)`;
@@ -1124,6 +1258,18 @@
       if (aiBadge && data.ai_info) {
         aiBadge.textContent = `✨ ${data.ai_info.label || 'Conseiller Pédagogique IA activé'}`;
       }
+
+      // Peupler le sélecteur de classe pour le Bilan IA & Rapport PDF
+      const reportClassSel = document.getElementById('report-class-select');
+      if (reportClassSel && Array.isArray(data.classes)) {
+        const curVal = reportClassSel.value;
+        reportClassSel.innerHTML = '<option value="ALL">Toutes les promotions</option>' +
+          data.classes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+        if (curVal && (curVal === 'ALL' || data.classes.includes(curVal))) {
+          reportClassSel.value = curVal;
+        }
+      }
+      renderSavedClassReview();
 
       const tbody = document.getElementById('teach-students-tbody');
       tbody.innerHTML = data.students.map(s => {
@@ -1138,19 +1284,32 @@
           ? `<div id="ai-coaching-text-${s.student_id}" class="text-xs text-slate-700 bg-indigo-50/60 border border-indigo-100 p-3 rounded-xl leading-relaxed whitespace-pre-wrap">${escapeHtml(s.ai_coaching)}</div>`
           : `<div id="ai-coaching-text-${s.student_id}" class="text-xs text-slate-400 italic bg-slate-50 border border-dashed border-slate-200 p-2.5 rounded-xl">Aucun conseil généré pour le moment — Cliquez sur « Demander conseil à l'IA » pour obtenir des pistes pédagogiques.</div>`;
 
+        const estScore = s.estimated_future_score !== null && s.estimated_future_score !== undefined
+          ? s.estimated_future_score
+          : s.default_estimated_future_score;
+        const estDiff = (estScore !== null && estScore !== undefined && s.average_score !== null)
+          ? +(estScore - s.average_score).toFixed(2)
+          : 0;
+        const estBadgeHtml = estScore !== null && estScore !== undefined
+          ? `<div id="ai-est-score-${s.student_id}" class="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200" title="Note de performance future estimée à M+1">
+               <span>🔮 M+1 : ${estScore}/20</span>
+               <span class="${estDiff >= 0 ? 'text-emerald-600' : 'text-rose-600'}">(${estDiff >= 0 ? '+' : ''}${estDiff})</span>
+             </div>`
+          : `<div id="ai-est-score-${s.student_id}" class="mt-1 text-[11px] text-slate-400">🔮 M+1 : --</div>`;
+
         const hasDebug = Boolean(s.ai_prompt || s.ai_raw_response);
         const debugAccordionHtml = `
           <details id="ai-debug-details-${s.student_id}" class="${hasDebug ? '' : 'hidden'} mt-2 text-[11px] text-slate-500">
             <summary class="cursor-pointer hover:text-indigo-600 font-semibold inline-flex items-center gap-1 select-none">
-              <span>🔍 Données brutes de l'IA (Prompt & Réponse brute reçue)</span>
+              <span>🔍 Données brutes de l'IA (Prompt anonymisé & Réponse brute)</span>
             </summary>
             <div class="mt-2 p-3 rounded-xl bg-slate-900 text-slate-200 text-[10px] space-y-2.5 border border-slate-800">
               <div>
-                <p class="font-bold text-indigo-400 mb-1">📤 Prompt envoyé à l'IA :</p>
+                <p class="font-bold text-indigo-400 mb-1">📤 Prompt compact anonymisé (ETUD-XX) envoyé à l'IA :</p>
                 <pre id="ai-prompt-pre-${s.student_id}" class="p-2 rounded bg-slate-950 text-indigo-200 whitespace-pre-wrap overflow-x-auto max-h-44 leading-relaxed font-mono">${escapeHtml(s.ai_prompt || '')}</pre>
               </div>
               <div class="pt-2 border-t border-slate-800">
-                <p class="font-bold text-emerald-400 mb-1">📥 Réponse brute reçue de l'IA (JSON / Texte brut) :</p>
+                <p class="font-bold text-emerald-400 mb-1">📥 Réponse brute reçue de l'IA (avant désanonymisation) :</p>
                 <pre id="ai-raw-pre-${s.student_id}" class="p-2 rounded bg-slate-950 text-emerald-300 whitespace-pre-wrap overflow-x-auto max-h-56 leading-relaxed font-mono">${escapeHtml(s.ai_raw_response || '')}</pre>
               </div>
             </div>
@@ -1168,14 +1327,15 @@
               <p class="text-xs text-indigo-600 font-medium">${escapeHtml(s.class_name || 'Générale')}</p>
               <p class="text-[11px] text-slate-400">${escapeHtml(s.email)}</p>
             </td>
-            <td class="py-4 px-2 min-w-[120px]">
+            <td class="py-4 px-2 min-w-[145px]">
               <p class="font-extrabold text-base ${s.average_score !== null && s.average_score < 10 ? 'text-rose-600' : 'text-slate-900'}">
                 ${s.average_score !== null ? s.average_score + ' / 20' : '-'}
               </p>
               <p class="text-xs font-semibold mt-0.5 ${s.recent_trend < 0 ? 'text-rose-600' : 'text-emerald-600'}">
-                ${s.recent_trend >= 0 ? '+' : ''}${s.recent_trend} pt(s)
+                Évol : ${s.recent_trend >= 0 ? '+' : ''}${s.recent_trend} pt(s)
               </p>
-              <p class="text-[11px] text-slate-400">${s.statements_count || 0} note(s)</p>
+              ${estBadgeHtml}
+              <p class="text-[10px] text-slate-400 mt-1">${s.statements_count || 0} évaluation(s)</p>
             </td>
             <td class="py-4 px-2 min-w-[140px]">
               <span class="text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeClass} inline-block mb-1.5">${s.risk_level}</span>
@@ -1209,7 +1369,7 @@
               </div>
             </td>
             <td class="py-4 px-2 text-right">
-              <button onclick="focusStudentChart(${s.student_id})" title="Voir la trajectoire de cet élève"
+              <button onclick="focusStudentChart(${s.student_id})" title="Voir la trajectoire et la courbe future de cet élève"
                 class="text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition inline-flex items-center gap-1 cursor-pointer">
                 <span>📊 Graphique</span>
               </button>
@@ -1251,6 +1411,11 @@
           textBox.textContent = data.ai_coaching;
           textBox.className = 'text-xs text-slate-700 bg-indigo-50/60 border border-indigo-100 p-3 rounded-xl leading-relaxed whitespace-pre-wrap';
         }
+        const estEl = document.getElementById(`ai-est-score-${studentId}`);
+        if (estEl && data.estimated_future_score !== null && data.estimated_future_score !== undefined) {
+          estEl.innerHTML = `<span>🔮 M+1 : ${data.estimated_future_score}/20</span>`;
+          estEl.className = 'mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200';
+        }
         const metaEl = document.getElementById(`ai-coaching-meta-${studentId}`);
         if (metaEl) {
           metaEl.textContent = data.updated_at ? `Mis à jour le ${data.updated_at}` : 'Conseil IA actualisé';
@@ -1267,6 +1432,7 @@
         if (btnEl) {
           btnEl.innerHTML = '<span>✨ Réactualiser le conseil</span>';
         }
+        await loadTeacherChartData();
       } catch (err) {
         console.error(err);
       } finally {
@@ -1282,17 +1448,21 @@
       const originalHtml = btnEl ? btnEl.innerHTML : '';
       if (btnEl) {
         btnEl.disabled = true;
-        btnEl.innerHTML = '<span>⏳ Analyse de la classe en cours...</span>';
+        btnEl.innerHTML = '<span>⏳ Requête groupée IA en cours...</span>';
       }
       if (fb) {
         fb.className = 'text-xs p-3.5 rounded-xl border bg-indigo-50 border-indigo-200 text-indigo-800 font-medium';
-        fb.textContent = '⏳ Analyse en cours : génération des conseils pédagogiques personnalisés pour l\'ensemble des élèves...';
+        fb.textContent = '⏳ Envoi d\'une requête groupée compacte et anonymisée (ETUD-01..N) pour générer et écraser les conseils + estimations futures de tous les élèves...';
         fb.classList.remove('hidden');
       }
       try {
         const res = await fetch('/api/teacher/ai-coaching/all', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ class_name: 'ALL' })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -1304,11 +1474,293 @@
         }
         if (fb) {
           fb.className = 'text-xs p-3.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 font-semibold';
-          fb.textContent = `✓ Analyse terminée : ${data.generated_count} conseil(s) pédagogique(s) généré(s) pour la classe.`;
+          fb.textContent = `✓ Requête groupée terminée : ${data.generated_count} conseil(s) pédagogique(s) et note(s) future(s) estimée(s) mis à jour et personnalisés.`;
         }
         await loadTeacherDashboard();
       } catch (err) {
         console.error(err);
+      } finally {
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.innerHTML = originalHtml;
+        }
+      }
+    }
+
+    async function generateClassAIReview(btnEl) {
+      const sel = document.getElementById('report-class-select');
+      const className = sel ? sel.value : 'ALL';
+      const box = document.getElementById('class-review-box');
+      const originalHtml = btnEl ? btnEl.innerHTML : '';
+
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '<span>⏳ Analyse IA de la classe...</span>';
+      }
+      if (box) {
+        box.textContent = '⏳ Génération de la Review IA globale et de l\'estimation future de la classe en cours (prompt compact anonymisé)...';
+        box.className = 'p-4 rounded-xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-800 font-medium leading-relaxed';
+      }
+      try {
+        const res = await fetch('/api/teacher/ai-class-review', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ class_name: className })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (box) {
+            box.textContent = data.detail || 'Erreur lors de la génération du bilan IA de la classe.';
+            box.className = 'p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium';
+          }
+          return;
+        }
+        if (!teacherAnalyticsData) teacherAnalyticsData = { class_reviews: {} };
+        if (!teacherAnalyticsData.class_reviews) teacherAnalyticsData.class_reviews = {};
+        teacherAnalyticsData.class_reviews[className] = data;
+        renderSavedClassReview();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.innerHTML = originalHtml;
+        }
+      }
+    }
+
+    async function generateCompleteClassReportPDF(btnEl) {
+      const sel = document.getElementById('report-class-select');
+      const className = sel ? sel.value : 'ALL';
+      const fb = document.getElementById('ai-coaching-global-feedback');
+      const originalHtml = btnEl ? btnEl.innerHTML : '';
+
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '<span>⏳ Préparation IA & Génération PDF...</span>';
+      }
+      if (fb) {
+        fb.className = 'text-xs p-3.5 rounded-xl border bg-indigo-50 border-indigo-200 text-indigo-800 font-medium';
+        fb.textContent = '⏳ Vérification des conseils IA et estimations futures de la classe, puis assemblage du Rapport PDF Complet...';
+        fb.classList.remove('hidden');
+      }
+
+      try {
+        const res = await fetch('/api/teacher/class-report', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ class_name: className, force_regenerate: false })
+        });
+        const report = await res.json();
+        if (!res.ok) {
+          alert(report.detail || 'Impossible de générer le rapport de classe.');
+          return;
+        }
+
+        // Rafraîchir le dashboard avec les éventuels conseils IA générés automatiquement pour le rapport
+        await loadTeacherDashboard();
+
+        // Générer le fichier PDF via jsPDF + autoTable
+        if (window.jspdf && window.jspdf.jsPDF) {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+          const pageW = doc.internal.pageSize.getWidth();
+          const pageH = doc.internal.pageSize.getHeight();
+          let y = 14;
+
+          // 1. Bandeau d'en-tête officiel
+          doc.setFillColor(30, 41, 59);
+          doc.rect(0, 0, pageW, 30, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text(`RAPPORT PÉDAGOGIQUE COMPLET & PRÉVISIONS IA`, 14, 12);
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.text(`Établissement : ${report.institution_name}  |  Classe : ${report.class_label}`, 14, 19);
+          doc.setFontSize(8.5);
+          doc.setTextColor(203, 213, 225);
+          doc.text(`Généré le ${report.generated_at} par ${report.generated_by}`, 14, 25);
+
+          y = 38;
+
+          // 2. Cartouche des Indicateurs Clés (KPIs & Estimations futures)
+          const sum = report.summary;
+          doc.setFillColor(248, 250, 252);
+          doc.setDrawColor(226, 232, 240);
+          doc.roundedRect(14, y, pageW - 28, 24, 3, 3, 'FD');
+
+          doc.setTextColor(15, 23, 42);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          const diffSign = sum.expected_progression >= 0 ? '+' : '';
+          doc.text(`Moyenne Actuelle : ${sum.class_average} / 20`, 18, y + 7);
+          doc.setTextColor(79, 70, 229);
+          doc.text(`Moyenne Future Estimée (M+1) : ${sum.estimated_future_class_average} / 20 (${diffSign}${sum.expected_progression} pt)`, 80, y + 7);
+
+          doc.setTextColor(51, 65, 85);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8.5);
+          doc.text(`Effectif : ${sum.total_students} élèves (${sum.total_evaluations} notes)  |  Taux de réussite : ${sum.pass_rate}%  |  Min : ${sum.lowest_score}/20  |  Max : ${sum.highest_score}/20`, 18, y + 14);
+          doc.text(`Répartition des profils :  Critique (Décrochage) : ${sum.critical_count}   |   Vigilance : ${sum.vigilance_count}   |   Stable : ${sum.stable_count}`, 18, y + 20);
+
+          y += 30;
+
+          // 3. Bilan IA Global de la Classe
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(11);
+          doc.setTextColor(30, 41, 59);
+          doc.text(`1. Synthèse & Review IA Globale de la Classe`, 14, y);
+          y += 4;
+
+          const reviewText = (report.class_ai_review && report.class_ai_review.review_text)
+            ? report.class_ai_review.review_text
+            : 'Aucun bilan global disponible.';
+          const splitReview = doc.splitTextToSize(reviewText, pageW - 34);
+          const boxH = Math.max(16, splitReview.length * 4.5 + 6);
+          doc.setFillColor(238, 242, 255);
+          doc.setDrawColor(199, 210, 254);
+          doc.roundedRect(14, y, pageW - 28, boxH, 2, 2, 'FD');
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8.8);
+          doc.setTextColor(30, 27, 75);
+          doc.text(splitReview, 17, y + 5.5);
+          y += boxH + 7;
+
+          // 4. Tableau des performances par matière
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(11);
+          doc.setTextColor(30, 41, 59);
+          doc.text(`2. Bilan Analytique par Matière`, 14, y);
+          y += 2;
+
+          if (doc.autoTable && report.course_stats && report.course_stats.length > 0) {
+            doc.autoTable({
+              startY: y,
+              margin: { left: 14, right: 14 },
+              head: [['Matière / Module', 'Moyenne', 'Taux Réussite (>=10)', 'Note Min', 'Note Max', 'Nb Notes']],
+              body: report.course_stats.map(c => [
+                c.course_name,
+                `${c.average} / 20`,
+                `${c.pass_rate}%`,
+                `${c.min} / 20`,
+                `${c.max} / 20`,
+                String(c.count)
+              ]),
+              styles: { fontSize: 8.2, cellPadding: 2.2 },
+              headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+              alternateRowStyles: { fillColor: [248, 250, 252] }
+            });
+            y = doc.lastAutoTable.finalY + 7;
+          }
+
+          // 5. Intégration du graphique si disponible et visible
+          const chartCanvas = document.getElementById('teacherMainChart');
+          if (chartCanvas && !document.getElementById('teacher-chart-wrapper').classList.contains('hidden')) {
+            try {
+              const imgData = chartCanvas.toDataURL('image/png', 1.0);
+              if (y + 58 > pageH - 15) {
+                doc.addPage();
+                y = 16;
+              }
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(11);
+              doc.setTextColor(30, 41, 59);
+              doc.text(`3. Courbe d'évolution & Projection d'apprentissage (M+1)`, 14, y);
+              y += 3;
+              doc.addImage(imgData, 'PNG', 14, y, pageW - 28, 52);
+              y += 58;
+            } catch (e) {
+              console.warn('Capture graphique PDF ignorée:', e);
+            }
+          }
+
+          // 6. Tableau détaillé par étudiant (Moyenne, Estimation Future M+1, Projection J+15/J+30, Conseil IA, Appréciation)
+          if (y + 25 > pageH - 15) {
+            doc.addPage();
+            y = 16;
+          }
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(11);
+          doc.setTextColor(30, 41, 59);
+          doc.text(`4. Suivi Individuel, Projections M+1 & Commentaires Pédagogiques IA`, 14, y);
+          y += 2;
+
+          if (doc.autoTable) {
+            const studentRows = report.students.map(st => {
+              const avgStr = st.average_score !== null ? `${st.average_score}/20` : '-';
+              const trendStr = `${st.recent_trend >= 0 ? '+' : ''}${st.recent_trend}`;
+              const estStr = st.estimated_future_score !== null && st.estimated_future_score !== undefined
+                ? `${st.estimated_future_score}/20`
+                : '-';
+              let curveStr = '';
+              if (Array.isArray(st.future_curve) && st.future_curve.length >= 5) {
+                const j15 = st.future_curve[2] ? st.future_curve[2].score_raw : '-';
+                const j30 = st.future_curve[4] ? st.future_curve[4].score_raw : '-';
+                curveStr = `\n(J+15: ${j15} → J+30: ${j30})`;
+              }
+              const appreciationPart = st.teacher_appreciation
+                ? `\n\n[Appréciation Prof] : ${st.teacher_appreciation}`
+                : '';
+              return [
+                `${st.full_name}\n(${st.class_name})`,
+                `${avgStr}\nÉvol: ${trendStr} pt`,
+                `${estStr}${curveStr}`,
+                `${st.risk_level}\nFragile: ${st.weakest_course}`,
+                `${st.ai_coaching}${appreciationPart}`
+              ];
+            });
+
+            doc.autoTable({
+              startY: y,
+              margin: { left: 14, right: 14 },
+              head: [['Étudiant', 'Moyenne & Tend.', 'Estimé M+1 (30j)', 'Risque & Point faible', 'Conseil Pédagogique IA & Appréciation']],
+              body: studentRows,
+              styles: { fontSize: 7.8, cellPadding: 2.5, valign: 'top', overflow: 'linebreak' },
+              headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
+              columnStyles: {
+                0: { cellWidth: 28, fontStyle: 'bold' },
+                1: { cellWidth: 22 },
+                2: { cellWidth: 25, fontStyle: 'bold', textColor: [67, 56, 202] },
+                3: { cellWidth: 28 },
+                4: { cellWidth: 79 }
+              },
+              alternateRowStyles: { fillColor: [248, 250, 252] }
+            });
+          }
+
+          // Pied de page avec pagination sur chaque page
+          const totalPages = doc.internal.getNumberOfPages();
+          for (let p = 1; p <= totalPages; p++) {
+            doc.setPage(p);
+            doc.setFontSize(7.5);
+            doc.setTextColor(148, 163, 184);
+            doc.text(
+              `EduPulse Learning Analytics — ${report.institution_name} (${report.class_label}) — Page ${p} / ${totalPages}`,
+              14,
+              pageH - 6
+            );
+          }
+
+          const safeClassSlug = String(report.class_label).replace(/[^a-zA-Z0-9_-]/g, '_');
+          doc.save(`Rapport_Pedagogique_IA_${safeClassSlug}.pdf`);
+
+          if (fb) {
+            fb.className = 'text-xs p-3.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 font-semibold';
+            fb.textContent = `✓ Rapport PDF complet généré et téléchargé pour « ${report.class_label} » (${report.students.length} élèves, conseils IA et projections M+1 inclus).`;
+          }
+        } else {
+          window.print();
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Erreur lors de la création du rapport PDF.");
       } finally {
         if (btnEl) {
           btnEl.disabled = false;
@@ -1563,10 +2015,11 @@
       const ctx = document.getElementById('teacherMainChart').getContext('2d');
 
       // -------------------------------------------------------------
-      // MODE 1 : COMPARATEUR D'ÉLÈVES
+      // MODE 1 : COMPARATEUR D'ÉLÈVES (+ PROJECTION M+1)
       // -------------------------------------------------------------
       if (teacherChartMode === 'compare') {
         const datasets = [];
+        let maxFutureTs = 0;
 
         teacherChartRaw.students.forEach(s => {
           if (!selectedStudentIds.has(s.id)) return;
@@ -1594,6 +2047,32 @@
             pointBackgroundColor: color,
             fill: false
           });
+
+          if (showFutureProjection && Array.isArray(s.future_curve) && s.future_curve.length > 1) {
+            const projPoints = s.future_curve.map(fp => {
+              const ts = new Date(fp.iso_timestamp).getTime();
+              if (ts > maxFutureTs) maxFutureTs = ts;
+              return {
+                x: ts,
+                y: fp.score_raw,
+                course: `Projection ${fp.label}`,
+                studentName: `${s.full_name} (Estimé)`
+              };
+            });
+            datasets.push({
+              label: `🔮 Proj. M+1 ${s.full_name} (${s.estimated_future_score ?? '-'})`,
+              data: projPoints,
+              borderColor: color,
+              borderDash: [5, 4],
+              borderWidth: 2,
+              tension: 0.25,
+              pointRadius: 3.5,
+              pointStyle: 'rectRot',
+              pointBackgroundColor: '#ffffff',
+              pointBorderColor: color,
+              fill: false
+            });
+          }
         });
 
         if (stmts.length > 0) {
@@ -1622,7 +2101,7 @@
 
           const allTimestamps = stmts.map(st => new Date(st.iso_timestamp || st.timestamp).getTime());
           const minX = Math.min(...allTimestamps);
-          const maxX = Math.max(...allTimestamps);
+          const maxX = Math.max(...allTimestamps, maxFutureTs || 0);
           const xSpan = (maxX - minX) * 0.04 || 86400000;
 
           datasets.push({
@@ -1643,7 +2122,7 @@
         });
 
       // -------------------------------------------------------------
-      // MODE 2 : ÉVOLUTION GLOBALE CLASSE
+      // MODE 2 : ÉVOLUTION GLOBALE CLASSE (+ PROJECTION M+1)
       // -------------------------------------------------------------
       } else if (teacherChartMode === 'class_trend') {
         const dateMap = {};
@@ -1671,59 +2150,87 @@
 
         const allTimestamps = stmts.map(st => new Date(st.iso_timestamp || st.timestamp).getTime());
         const minX = Math.min(...allTimestamps);
-        const maxX = Math.max(...allTimestamps);
+        let maxX = Math.max(...allTimestamps);
+
+        const classDatasets = [
+          {
+            label: 'Moyenne de la promotion',
+            data: avgPoints,
+            borderColor: '#059669',
+            backgroundColor: 'rgba(5, 150, 105, 0.12)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 3,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            pointBackgroundColor: '#059669'
+          },
+          {
+            label: 'Note la plus haute de la période',
+            data: maxPoints,
+            borderColor: '#10b981',
+            borderDash: [4, 4],
+            borderWidth: 1.5,
+            pointRadius: 3,
+            fill: false
+          },
+          {
+            label: 'Note la plus basse de la période',
+            data: minPoints,
+            borderColor: '#f43f5e',
+            borderDash: [4, 4],
+            borderWidth: 1.5,
+            pointRadius: 3,
+            fill: false
+          }
+        ];
+
+        if (showFutureProjection && avgPoints.length > 0) {
+          const lastPoint = avgPoints[avgPoints.length - 1];
+          const targetAvg = stats.estimated_future_average || stats.overall_average || lastPoint.y;
+          const classProjPoints = [
+            { x: lastPoint.x, y: lastPoint.y },
+            { x: lastPoint.x + 7 * 86400000, y: +(lastPoint.y + (targetAvg - lastPoint.y) * 0.28).toFixed(2) },
+            { x: lastPoint.x + 15 * 86400000, y: +(lastPoint.y + (targetAvg - lastPoint.y) * 0.55).toFixed(2) },
+            { x: lastPoint.x + 22 * 86400000, y: +(lastPoint.y + (targetAvg - lastPoint.y) * 0.78).toFixed(2) },
+            { x: lastPoint.x + 30 * 86400000, y: +Number(targetAvg).toFixed(2) }
+          ];
+          maxX = Math.max(maxX, lastPoint.x + 30 * 86400000);
+          classDatasets.push({
+            label: `🔮 Projection Moyenne M+1 (${targetAvg}/20)`,
+            data: classProjPoints,
+            borderColor: '#4f46e5',
+            backgroundColor: 'rgba(79, 70, 229, 0.10)',
+            borderDash: [6, 4],
+            borderWidth: 2.6,
+            tension: 0.25,
+            pointRadius: 4.5,
+            pointStyle: 'rectRot',
+            pointBackgroundColor: '#ffffff',
+            pointBorderColor: '#4f46e5',
+            fill: true
+          });
+        }
+
         const xSpan = (maxX - minX) * 0.04 || 86400000;
+        classDatasets.push({
+          label: 'Seuil de validation (10/20)',
+          data: [{ x: minX - xSpan, y: 10 }, { x: maxX + xSpan, y: 10 }],
+          borderColor: '#94a3b8',
+          borderDash: [3, 3],
+          borderWidth: 1.2,
+          pointRadius: 0,
+          fill: false
+        });
 
         teacherChartInstance = new Chart(ctx, {
           type: 'line',
-          data: {
-            datasets: [
-              {
-                label: 'Moyenne de la promotion',
-                data: avgPoints,
-                borderColor: '#059669',
-                backgroundColor: 'rgba(5, 150, 105, 0.12)',
-                fill: true,
-                tension: 0.3,
-                borderWidth: 3,
-                pointRadius: 5,
-                pointHoverRadius: 7,
-                pointBackgroundColor: '#059669'
-              },
-              {
-                label: 'Note la plus haute de la période',
-                data: maxPoints,
-                borderColor: '#10b981',
-                borderDash: [4, 4],
-                borderWidth: 1.5,
-                pointRadius: 3,
-                fill: false
-              },
-              {
-                label: 'Note la plus basse de la période',
-                data: minPoints,
-                borderColor: '#f43f5e',
-                borderDash: [4, 4],
-                borderWidth: 1.5,
-                pointRadius: 3,
-                fill: false
-              },
-              {
-                label: 'Seuil de validation (10/20)',
-                data: [{ x: minX - xSpan, y: 10 }, { x: maxX + xSpan, y: 10 }],
-                borderColor: '#94a3b8',
-                borderDash: [3, 3],
-                borderWidth: 1.2,
-                pointRadius: 0,
-                fill: false
-              }
-            ]
-          },
+          data: { datasets: classDatasets },
           options: getLineChartOptions('Évolution globale de la promotion')
         });
 
       // -------------------------------------------------------------
-      // MODE 3 : FOCUS ÉLÈVE INDIVIDUEL
+      // MODE 3 : FOCUS ÉLÈVE INDIVIDUEL (+ PROJECTION M+1 SUR 30 JOURS)
       // -------------------------------------------------------------
       } else if (teacherChartMode === 'single_student') {
         const studentSelect = document.getElementById('select-single-student');
@@ -1732,7 +2239,10 @@
 
         const badgeEl = document.getElementById('single-student-info');
         if (student) {
-          badgeEl.textContent = `Niveau : ${student.risk_level} (${student.average_score !== null ? student.average_score + '/20' : '-'})`;
+          const estPart = student.estimated_future_score !== null && student.estimated_future_score !== undefined
+            ? ` • 🔮 Estimé M+1 : ${student.estimated_future_score}/20`
+            : '';
+          badgeEl.textContent = `Niveau : ${student.risk_level} (${student.average_score !== null ? student.average_score + '/20' : '-'}${estPart})`;
           badgeEl.className = 'text-xs font-bold px-3 py-1 rounded-full ' + (
             student.risk_level === 'CRITIQUE' ? 'bg-rose-100 text-rose-700' :
             student.risk_level === 'VIGILANCE' ? 'bg-amber-100 text-amber-800' :
@@ -1753,8 +2263,7 @@
         const datasets = [];
         if (points.length > 0) {
           const minX = points[0].x;
-          const maxX = points[points.length - 1].x;
-          const xSpan = (maxX - minX) * 0.05 || 86400000;
+          let maxX = points[points.length - 1].x;
 
           datasets.push({
             label: `Notes de ${student ? student.full_name : 'l\'élève'}`,
@@ -1769,9 +2278,39 @@
             pointBackgroundColor: color
           });
 
+          if (showFutureProjection && student && Array.isArray(student.future_curve) && student.future_curve.length > 1) {
+            const projPoints = student.future_curve.map(fp => {
+              const ts = new Date(fp.iso_timestamp).getTime();
+              if (ts > maxX) maxX = ts;
+              return {
+                x: ts,
+                y: fp.score_raw,
+                course: `Projection ${fp.label} (${fp.date})`,
+                verb: 'predicted'
+              };
+            });
+            datasets.push({
+              label: `🔮 Courbe estimée M+1 (${student.estimated_future_score ?? '-'}/20 à J+30)`,
+              data: projPoints,
+              borderColor: '#7c3aed',
+              backgroundColor: 'rgba(124, 58, 237, 0.10)',
+              borderDash: [6, 4],
+              borderWidth: 2.6,
+              tension: 0.25,
+              pointRadius: 5,
+              pointHoverRadius: 7,
+              pointStyle: 'rectRot',
+              pointBackgroundColor: '#ffffff',
+              pointBorderColor: '#7c3aed',
+              fill: true
+            });
+          }
+
+          const xSpan = (maxX - minX) * 0.05 || 86400000;
+
           if (student && student.average_score !== null) {
             datasets.push({
-              label: `Moyenne personnelle (${student.average_score}/20)`,
+              label: `Moyenne actuelle (${student.average_score}/20)`,
               data: [{ x: minX - xSpan, y: student.average_score }, { x: maxX + xSpan, y: student.average_score }],
               borderColor: color,
               borderDash: [5, 5],
@@ -1805,7 +2344,7 @@
         teacherChartInstance = new Chart(ctx, {
           type: 'line',
           data: { datasets },
-          options: getLineChartOptions(student ? `Trajectoire de ${student.full_name}` : 'Trajectoire élève')
+          options: getLineChartOptions(student ? `Trajectoire & Projection M+1 de ${student.full_name}` : 'Trajectoire élève')
         });
 
       // -------------------------------------------------------------

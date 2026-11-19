@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 import io
 import json
@@ -9,7 +10,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 import jwt
 from fastapi import FastAPI, Depends, HTTPException, Header, Response, Request
@@ -98,13 +99,25 @@ class StudentAlert(Base):
     statements_count = Column(Integer, default=0)
     risk_level = Column(String(30), nullable=False)  # CRITIQUE, VIGILANCE, STABLE
     weakest_course = Column(String(120), nullable=True)
-    recommendation = Column(Text, nullable=False, default="")  # Message de coaching IA (visible uniquement côté prof)
-    ai_prompt = Column(Text, nullable=True)                    # Dernier prompt envoyé à l'IA
+    estimated_future_score = Column(Float, nullable=True)      # Note de performance future estimée (/20 à M+1)
+    recommendation = Column(Text, nullable=False, default="")  # Message de coaching IA personnalisé (visible uniquement côté prof)
+    ai_prompt = Column(Text, nullable=True)                    # Dernier prompt anonymisé envoyé à l'IA
     ai_raw_response = Column(Text, nullable=True)              # Réponse brute reçue de l'IA (JSON / Texte brut)
     ai_coaching_updated_at = Column(DateTime, nullable=True)
     teacher_appreciation = Column(Text, nullable=True)         # Appréciation personnalisée du prof (affichée côté étudiant)
     appreciation_author = Column(String(255), nullable=True)
     appreciation_updated_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ClassAIReview(Base):
+    __tablename__ = "class_ai_reviews"
+    id = Column(Integer, primary_key=True, index=True)
+    class_name = Column(String(120), unique=True, index=True, nullable=False)  # "ALL" ou nom de la classe
+    review_text = Column(Text, nullable=False, default="")
+    estimated_class_future_avg = Column(Float, nullable=True)
+    ai_prompt = Column(Text, nullable=True)
+    ai_raw_response = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -125,6 +138,10 @@ class ImportCSVRequest(BaseModel):
 
 class TeacherAppreciationRequest(BaseModel):
     appreciation: str
+
+class ClassActionRequest(BaseModel):
+    class_name: Optional[str] = "ALL"
+    force_regenerate: Optional[bool] = False
 
 class XAPIStatementInput(BaseModel):
     actor: Dict[str, Any]
@@ -230,59 +247,250 @@ def recompute_student_analytics(db: Session, student_id: int):
     db.commit()
 
 
-def build_gemini_coaching_prompt(
+def compute_default_estimated_future_score(avg_score: Optional[float], recent_trend: float) -> Optional[float]:
+    """Calcule une estimation mathématique sur 20 de la performance future (M+1) à partir de la moyenne et de la tendance."""
+    if avg_score is None:
+        return None
+    # Projection pondérée avec amortissement réaliste et léger rebond pédagogique si accompagnement
+    delta = recent_trend * 0.55
+    if avg_score < 10.0 and recent_trend >= -1.0:
+        delta += 0.35
+    val = max(0.0, min(20.0, avg_score + delta))
+    return round(val, 2)
+
+
+def compute_student_future_curve(
+    records: List[XAPIStatementRecord],
+    avg_score: Optional[float],
+    recent_trend: float,
+    estimated_future_score: Optional[float],
+) -> List[Dict[str, Any]]:
+    """
+    Génère la courbe d'évolution estimée sur le mois prochain (30 jours : J+7, J+15, J+22, J+30)
+    pour un étudiant à partir de sa dernière note, de sa dynamique et de sa note future estimée.
+    """
+    if not records or avg_score is None:
+        return []
+
+    last_rec = records[-1]
+    base_dt = last_rec.timestamp
+    start_score = last_rec.score_raw
+    target_score = (
+        estimated_future_score
+        if estimated_future_score is not None
+        else compute_default_estimated_future_score(avg_score, recent_trend)
+    )
+    if target_score is None:
+        target_score = avg_score
+
+    # Points d'ancrage : point 0 = dernière note réelle, puis +7j, +15j, +22j, +30j
+    milestones = [
+        (0, "Dernière note", 0.0),
+        (7, "J+7", 0.28),
+        (15, "J+15", 0.55),
+        (22, "J+22", 0.78),
+        (30, "J+30 (M+1)", 1.0),
+    ]
+    curve: List[Dict[str, Any]] = []
+    for days_offset, label, progress in milestones:
+        dt = base_dt + timedelta(days=days_offset)
+        # Interpolation progressive avec légère courbure d'apprentissage
+        interp = start_score + (target_score - start_score) * (progress ** 0.88 if progress > 0 else 0.0)
+        score_val = round(max(0.0, min(20.0, interp)), 2)
+        curve.append({
+            "days_offset": days_offset,
+            "label": label,
+            "date": dt.strftime("%d/%m/%Y"),
+            "iso_timestamp": dt.isoformat(),
+            "score_raw": score_val,
+        })
+    return curve
+
+
+def deanonymize_text(text: str, code_to_name: Dict[str, str]) -> str:
+    """
+    Remplace dans le texte reçu de l'IA toutes les occurrences des jetons anonymes (ex: ETUD-01, ETUD-1)
+    par le vrai nom complet de l'étudiant correspondant.
+    Ainsi, les données envoyées sur le réseau sont 100% anonymes mais l'affichage côté enseignant est personnalisé.
+    """
+    if not text or not code_to_name:
+        return text or ""
+    result = text
+    # Trier par code le plus long d'abord (ex: ETUD-10 avant ETUD-1)
+    sorted_items = sorted(code_to_name.items(), key=lambda kv: len(kv[0]), reverse=True)
+    for code, full_name in sorted_items:
+        # Supporte ETUD-01, [ETUD-01], (ETUD-01) et aussi la variante sans zéro initial ex: ETUD-1
+        pattern = re.compile(r"\b" + re.escape(code) + r"\b", flags=re.IGNORECASE)
+        result = pattern.sub(full_name, result)
+        num_match = re.match(r"^ETUD-0*(\d+)$", code, flags=re.IGNORECASE)
+        if num_match:
+            num_str = num_match.group(1)
+            alt_pattern = re.compile(rf"\bETUD-0*{num_str}\b", flags=re.IGNORECASE)
+            result = alt_pattern.sub(full_name, result)
+    return result
+
+
+def extract_json_from_llm(raw_text: str) -> Any:
+    """Extrait et parse un objet ou tableau JSON depuis la réponse texte d'un LLM (même entouré de ```json)."""
+    if not raw_text:
+        return None
+    cleaned = raw_text.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+    # Recherche du premier bloc [...] ou {...}
+    for start_char, end_char in [("[", "]"), ("{", "}")]:
+        s_idx = cleaned.find(start_char)
+        e_idx = cleaned.rfind(end_char)
+        if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+            try:
+                return json.loads(cleaned[s_idx : e_idx + 1])
+            except Exception:
+                continue
+    return None
+
+
+def call_gemini_generate(prompt: str, max_tokens: int = 2048) -> Tuple[str, str, str]:
+    """
+    Exécute un appel HTTP vers l'API Gemini si GEMINI_API_KEY est configurée.
+    Retourne (extracted_text, raw_response_json_str, source).
+    """
+    if not GEMINI_API_KEY:
+        return "", "", "simulation"
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.55,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            raw_decoded = resp.read().decode("utf-8")
+            resp_data = json.loads(raw_decoded)
+            try:
+                raw_response_str = json.dumps(resp_data, indent=2, ensure_ascii=False)
+            except Exception:
+                raw_response_str = raw_decoded
+
+            candidates = resp_data.get("candidates") or []
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                text_parts = [p.get("text", "") for p in parts if not p.get("thought", False)]
+                if not text_parts:
+                    text_parts = [p.get("text", "") for p in parts]
+                extracted = "".join(text_parts).strip()
+                if extracted:
+                    return extracted, raw_response_str, "api_ia"
+            return "", raw_response_str, "simulation (réponse vide)"
+    except urllib.error.HTTPError as http_err:
+        try:
+            err_body = http_err.read().decode("utf-8")
+            raw_err = json.dumps({
+                "status_code": http_err.code,
+                "reason": http_err.reason,
+                "model_used": GEMINI_MODEL,
+                "error_body": json.loads(err_body) if err_body.startswith("{") else err_body,
+            }, indent=2, ensure_ascii=False)
+        except Exception:
+            raw_err = f"HTTP Error {http_err.code} ({GEMINI_MODEL}): {http_err.reason}"
+        return "", raw_err, f"simulation (erreur HTTP {http_err.code})"
+    except Exception as exc:
+        raw_err = json.dumps({
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "model_used": GEMINI_MODEL,
+        }, indent=2, ensure_ascii=False)
+        return "", raw_err, f"simulation (secours: {type(exc).__name__})"
+
+
+def build_compact_student_line(
+    code: str,
     student: User,
     alert: StudentAlert,
     records: List[XAPIStatementRecord],
 ) -> str:
     """
-    Construit le prompt pédagogique anonymisé envoyé au modèle d'IA en injectant
-    les indicateurs de l'étudiant sans aucune donnée nominative (RGPD).
+    Construit une ligne ultra-compacte et anonymisée (ETUD-XX) résumant l'élève
+    afin de minimiser la taille du prompt et la consommation de tokens.
     """
     course_scores: Dict[str, List[float]] = {}
     for r in records:
         course_scores.setdefault(r.course_name, []).append(r.score_raw)
-
-    course_summary_lines = [
-        f"  - {course} : moyenne {round(sum(vals)/len(vals), 2)}/20 ({len(vals)} évaluation(s), min {min(vals)}/20, max {max(vals)}/20)"
-        for course, vals in sorted(course_scores.items())
-    ]
-    recent_records = records[-8:]
-    grades_history_lines = [
-        f"  - [{r.timestamp.strftime('%d/%m/%Y')}] {r.course_name} ({r.verb}) : {r.score_raw}/20"
-        for r in recent_records
-    ]
-
-    anon_id = f"ETU-{student.id:03d}"
-    student_class = getattr(student, "class_name", "Générale") or "Générale"
-    prompt = (
-        "Tu es un conseiller pédagogique expert en Learning Analytics pour un établissement d'enseignement supérieur.\n"
-        "Rédige une recommandation de coaching pédagogique personnalisée destinée à l'enseignant pour l'aider à accompagner cet apprenant.\n"
-        "CONFIDENTIALITÉ : Les données ci-dessous sont strictement anonymisées (aucun nom, prénom ou email n'est transmis).\n\n"
-        f"=== VARIABLES ÉTUDIANT (ANONYMISÉ) ===\n"
-        f"- Identifiant anonyme : {anon_id}\n"
-        f"- Promotion / Classe : {student_class}\n"
-        f"- Moyenne générale : {alert.average_score}/20 (sur {alert.statements_count} notes)\n"
-        f"- Évolution récente : {alert.recent_trend:+.2f} pt(s)\n"
-        f"- Niveau de risque statistique : {alert.risk_level}\n"
-        f"- Matière la plus fragile : {alert.weakest_course}\n\n"
-        f"=== MOYENNES PAR MATIÈRE ===\n"
-        + "\n".join(course_summary_lines)
-        + "\n\n=== DERNIÈRES NOTES ENREGISTRÉES ===\n"
-        + "\n".join(grades_history_lines)
-        + "\n\n=== CONSIGNE DE RÉDACTION ===\n"
-        "Rédige une analyse concise et directe en 3 à 4 phrases (en français, ton professionnel et bienveillant destiné au professeur). "
-        "Synthétise la trajectoire de l'élève en citant ses chiffres clés et propose 2 actions concrètes de coaching à mettre en place dès cette semaine. "
-        "Important : Ne commence PAS par des formules de politesse ou de salutation (pas de 'Bonjour', 'Cher enseignant', etc.), entre directement dans le diagnostic pédagogique. "
-        "Désigne l'apprenant simplement par « cet étudiant » ou « l'étudiant » (n'invente aucun nom)."
+    course_avgs_str = ", ".join(
+        f"{c}={round(sum(v)/len(v), 1)}" for c, v in sorted(course_scores.items())
     )
-    return prompt
+    recent_notes_str = ", ".join(str(r.score_raw) for r in records[-4:])
+    student_class = getattr(student, "class_name", "Générale") or "Générale"
+    return (
+        f"{code} | Classe:{student_class} | Moy:{alert.average_score}/20 | "
+        f"Tend:{alert.recent_trend:+.2f} | Risque:{alert.risk_level} | "
+        f"Fragile:{alert.weakest_course} | MoyMatières:[{course_avgs_str}] | "
+        f"DernièresNotes:[{recent_notes_str}]"
+    )
+
+
+def build_fallback_student_coaching(
+    code: str,
+    student: User,
+    alert: StudentAlert,
+    records: List[XAPIStatementRecord],
+) -> Tuple[str, float]:
+    """
+    Génère en local (fallback ou simulation) le texte de conseil avec le jeton `code` (ex: ETUD-01)
+    ainsi que la note future estimée sur 20. Le texte sera ensuite désanonymisé par `deanonymize_text`.
+    """
+    course_scores: Dict[str, List[float]] = {}
+    for r in records:
+        course_scores.setdefault(r.course_name, []).append(r.score_raw)
+    course_avgs = {c: round(sum(v) / len(v), 2) for c, v in course_scores.items()}
+    weakest_course = alert.weakest_course or min(course_avgs, key=course_avgs.get)
+    weakest_avg = course_avgs.get(weakest_course, alert.average_score)
+    best_course = max(course_avgs, key=course_avgs.get)
+    best_avg = course_avgs.get(best_course, alert.average_score)
+    last_rec = records[-1]
+    est_score = compute_default_estimated_future_score(alert.average_score, alert.recent_trend) or alert.average_score
+
+    if alert.risk_level == "CRITIQUE":
+        advice_anon = (
+            f"{code} présente un décrochage préoccupant (moyenne {alert.average_score}/20, évolution {alert.recent_trend:+.2f} pts, "
+            f"dernière note à {last_rec.score_raw}/20 en {last_rec.course_name}) avec une lacune marquée en {weakest_course} ({weakest_avg}/20). "
+            f"Actions pour accompagner {code} : (1) organiser un point individuel rapide en s'appuyant sur {best_course} ({best_avg}/20) ; "
+            f"(2) mettre en place un tutorat ciblé en {weakest_course} (projection estimée à M+1 : {est_score}/20)."
+        )
+    elif alert.risk_level == "VIGILANCE":
+        advice_anon = (
+            f"{code} se situe en zone de vigilance (moyenne {alert.average_score}/20, tendance {alert.recent_trend:+.2f} pts) "
+            f"avec un écart entre {best_course} ({best_avg}/20) et {weakest_course} ({weakest_avg}/20). "
+            f"Actions pour {code} : (1) attribuer des exercices progressifs en {weakest_course} avant le prochain contrôle ; "
+            f"(2) vérifier la compréhension en fin de TP pour viser {est_score}/20 le mois prochain."
+        )
+    else:
+        advice_anon = (
+            f"{code} maintient une progression solide ({alert.average_score}/20 sur {alert.statements_count} notes, tendance {alert.recent_trend:+.2f} pts), "
+            f"notamment en {best_course} ({best_avg}/20). "
+            f"Actions pour {code} : (1) proposer un défi d'approfondissement en {best_course} ; "
+            f"(2) consolider {weakest_course} ({weakest_avg}/20) ou impliquer {code} en binôme d'entraide (projection M+1 : {est_score}/20)."
+        )
+    return advice_anon, est_score
 
 
 def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
     """
-    Génère une recommandation de coaching pédagogique anonymisée via l'IA pour un étudiant donné
-    et sauvegarde le conseil ainsi que le prompt et la réponse brute en base.
+    Génération UNITAIRE (écrase uniquement l'élève concerné) :
+    Envoie un prompt compact anonymisé avec `ETUD-01`, récupère le conseil + la note future estimée,
+    et remplace `ETUD-01` par le vrai nom de l'élève à la réception.
     """
     recompute_student_analytics(db, student.id)
     records = (
@@ -300,125 +508,65 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
             "generated": False,
             "source": "none",
             "ai_coaching": "Aucune note disponible pour analyser cet élève.",
+            "estimated_future_score": None,
             "prompt_used": "",
             "raw_response": "",
         }
 
-    prompt = build_gemini_coaching_prompt(student, alert, records)
-    anon_id = f"ETU-{student.id:03d}"
-    coaching_text = ""
-    raw_response_str = ""
-    source = "simulation"
+    code = "ETUD-01"
+    code_to_name = {code: student.full_name}
+    compact_line = build_compact_student_line(code, student, alert, records)
 
-    # 1. Appel réel à l'API IA si GEMINI_API_KEY est renseignée
-    if GEMINI_API_KEY:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 2048,
-            },
-        }
-        try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                resp_bytes = resp.read()
-                raw_decoded = resp_bytes.decode("utf-8")
-                resp_data = json.loads(raw_decoded)
+    prompt = (
+        "Tu es conseiller pédagogique IA. Analyse l'élève anonymisé ci-dessous et réponds UNIQUEMENT avec un objet JSON strict :\n"
+        '{"code":"ETUD-01","estimated_score":12.5,"advice":"2 à 3 phrases de coaching concret pour le professeur en citant explicitement ETUD-01 (sans formule de politesse)."}\n'
+        f"Données : {compact_line}"
+    )
+
+    extracted_text, raw_response_str, source = call_gemini_generate(prompt, max_tokens=600)
+    coaching_anon = ""
+    est_score: Optional[float] = None
+
+    if extracted_text:
+        parsed = extract_json_from_llm(extracted_text)
+        if isinstance(parsed, list) and parsed:
+            parsed = parsed[0]
+        if isinstance(parsed, dict):
+            coaching_anon = str(parsed.get("advice") or parsed.get("coaching") or "").strip()
+            raw_est = parsed.get("estimated_score")
+            if raw_est is not None:
                 try:
-                    raw_response_str = json.dumps(resp_data, indent=2, ensure_ascii=False)
+                    est_score = round(max(0.0, min(20.0, float(raw_est))), 2)
                 except Exception:
-                    raw_response_str = raw_decoded
+                    est_score = None
+        if not coaching_anon:
+            coaching_anon = extracted_text
 
-                candidates = resp_data.get("candidates") or []
-                if candidates:
-                    candidate = candidates[0]
-                    parts = candidate.get("content", {}).get("parts", [])
-                    # Dans les modèles avec pensée (thinking), filtrer les parts thought: True
-                    text_parts = [p.get("text", "") for p in parts if not p.get("thought", False)]
-                    if not text_parts:
-                        text_parts = [p.get("text", "") for p in parts]
-                    extracted = "".join(text_parts).strip()
-                    if extracted:
-                        coaching_text = extracted
-                        source = "api_ia"
-        except urllib.error.HTTPError as http_err:
-            try:
-                err_body = http_err.read().decode("utf-8")
-                raw_response_str = json.dumps({
-                    "status_code": http_err.code,
-                    "reason": http_err.reason,
-                    "model_used": GEMINI_MODEL,
-                    "error_body": json.loads(err_body) if err_body.startswith("{") else err_body,
-                }, indent=2, ensure_ascii=False)
-            except Exception:
-                raw_response_str = f"HTTP Error {http_err.code} ({GEMINI_MODEL}): {http_err.reason}"
-            source = f"simulation (erreur HTTP {http_err.code})"
-        except Exception as exc:
-            raw_response_str = json.dumps({
-                "error": str(exc),
-                "type": type(exc).__name__,
-                "model_used": GEMINI_MODEL,
-            }, indent=2, ensure_ascii=False)
-            source = f"simulation (secours: {type(exc).__name__})"
-
-    # 2. Simulation pédagogique contextualisée (si pas de clé ou si échec API)
-    if not coaching_text:
-        course_scores: Dict[str, List[float]] = {}
-        for r in records:
-            course_scores.setdefault(r.course_name, []).append(r.score_raw)
-        course_avgs = {c: round(sum(v) / len(v), 2) for c, v in course_scores.items()}
-        weakest_course = alert.weakest_course or min(course_avgs, key=course_avgs.get)
-        weakest_avg = course_avgs.get(weakest_course, alert.average_score)
-        best_course = max(course_avgs, key=course_avgs.get)
-        best_avg = course_avgs.get(best_course, alert.average_score)
-        last_rec = records[-1]
-        student_class = getattr(student, "class_name", "Générale") or "Générale"
-
-        if alert.risk_level == "CRITIQUE":
-            coaching_text = (
-                f"Alerte de décrochage prononcée pour cet étudiant ({anon_id}, {student_class}) avec une moyenne globale de {alert.average_score}/20 "
-                f"(évolution récente de {alert.recent_trend:+.2f} pts, dernière note à {last_rec.score_raw}/20 en {last_rec.course_name}) "
-                f"et une lacune critique en {weakest_course} ({weakest_avg}/20). "
-                f"Actions de coaching recommandées : (1) planifier un entretien individuel de remédiation cette semaine en s'appuyant sur "
-                f"ses acquis relatifs en {best_course} ({best_avg}/20) pour restaurer la confiance ; "
-                f"(2) découper le module {weakest_course} en micro-objectifs progressifs avec un suivi hebdomadaire en binôme."
-            )
-        elif alert.risk_level == "VIGILANCE":
-            coaching_text = (
-                f"Profil en zone de vigilance pour cet étudiant ({anon_id}, {student_class}) (moyenne {alert.average_score}/20, dynamique récente de {alert.recent_trend:+.2f} pts) "
-                f"marqué par un écart entre {best_course} ({best_avg}/20) et {weakest_course} ({weakest_avg}/20, dernière note : {last_rec.score_raw}/20 en {last_rec.course_name}). "
-                f"Actions de coaching recommandées : (1) proposer à cet étudiant une fiche d'entraînement ciblée sur {weakest_course} "
-                f"avant la prochaine évaluation ; (2) faire un point méthodologique de 10 minutes en fin de séance pour consolider les notions clés."
-            )
-        else:
-            coaching_text = (
-                f"Excellente maîtrise globale pour cet étudiant ({anon_id}, {student_class}) ({alert.average_score}/20 sur {alert.statements_count} évaluations, tendance {alert.recent_trend:+.2f} pts), "
-                f"portée par de très bons résultats en {best_course} ({best_avg}/20) et une dernière note de {last_rec.score_raw}/20 en {last_rec.course_name}. "
-                f"Actions de coaching recommandées : (1) valoriser sa régularité et lui proposer un sujet d'approfondissement ou défi avancé en {best_course} ; "
-                f"(2) consolider {weakest_course} ({weakest_avg}/20) ou l'inviter à parrainer un camarade de promotion."
-            )
-
+    if not coaching_anon:
+        coaching_anon, fallback_est = build_fallback_student_coaching(code, student, alert, records)
+        if est_score is None:
+            est_score = fallback_est
         if not raw_response_str:
             raw_response_str = json.dumps({
                 "statut": "simulation_locale_active",
                 "cle_api_presente": bool(GEMINI_API_KEY),
                 "modele_configure": GEMINI_MODEL,
-                "message": "Génération pédagogique locale anonymisée basée sur les notes et les variables du prompt.",
-                "id_anonyme": anon_id,
-                "classe": student_class,
-                "moyenne": alert.average_score,
-                "matiere_fragile": weakest_course,
-                "coaching": coaching_text,
+                "code_anonyme": code,
+                "estimated_score": est_score,
+                "advice_anonyme": coaching_anon,
             }, indent=2, ensure_ascii=False)
 
-    alert.recommendation = coaching_text
+    if est_score is None:
+        est_score = compute_default_estimated_future_score(alert.average_score, alert.recent_trend)
+
+    # Désanonymisation à la réception : remplace ETUD-01 par le nom réel de l'étudiant
+    personalized_coaching = deanonymize_text(coaching_anon, code_to_name)
+    if student.full_name not in personalized_coaching:
+        personalized_coaching = f"[{student.full_name}] {personalized_coaching}"
+
+    # Overwrite des données de l'élève concerné
+    alert.recommendation = personalized_coaching
+    alert.estimated_future_score = est_score
     alert.ai_prompt = prompt
     alert.ai_raw_response = raw_response_str
     alert.ai_coaching_updated_at = datetime.utcnow()
@@ -430,10 +578,306 @@ def generate_student_ai_coaching(db: Session, student: User) -> Dict[str, Any]:
         "full_name": student.full_name,
         "generated": True,
         "source": source,
-        "ai_coaching": coaching_text,
+        "ai_coaching": personalized_coaching,
+        "estimated_future_score": est_score,
         "prompt_used": prompt,
         "raw_response": raw_response_str,
         "updated_at": alert.ai_coaching_updated_at.strftime("%d/%m/%Y à %H:%M"),
+    }
+
+
+def generate_batch_ai_coaching(db: Session, students: List[User]) -> Dict[str, Any]:
+    """
+    Génération GROUPÉE en UNE SEULE requête IA (écrase les anciens conseils de tous les élèves ciblés) :
+    - Construit un unique prompt compact listant tous les élèves sous forme `ETUD-01`, `ETUD-02`...
+    - Récupère dans une seule réponse JSON le conseil et la note future estimée pour chaque `ETUD-XX`
+    - Répartit les résultats par élève et remplace `ETUD-XX` par le vrai nom de chaque étudiant à la réception.
+    """
+    eligible: List[Tuple[str, User, StudentAlert, List[XAPIStatementRecord]]] = []
+    code_to_name: Dict[str, str] = {}
+    compact_lines: List[str] = []
+
+    idx = 1
+    for s in students:
+        recompute_student_analytics(db, s.id)
+        records = (
+            db.query(XAPIStatementRecord)
+            .filter(XAPIStatementRecord.student_id == s.id)
+            .order_by(XAPIStatementRecord.timestamp.asc())
+            .all()
+        )
+        alert = db.query(StudentAlert).filter(StudentAlert.student_id == s.id).first()
+        if not records or not alert:
+            continue
+        code = f"ETUD-{idx:02d}"
+        idx += 1
+        code_to_name[code] = s.full_name
+        eligible.append((code, s, alert, records))
+        compact_lines.append(build_compact_student_line(code, s, alert, records))
+
+    if not eligible:
+        return {
+            "generated_count": 0,
+            "total_students": len(students),
+            "model": GEMINI_MODEL,
+            "results": [],
+        }
+
+    prompt = (
+        "Tu es conseiller pédagogique IA. Analyse chaque élève anonymisé ci-dessous.\n"
+        "Réponds UNIQUEMENT avec un tableau JSON strict contenant 1 objet par élève :\n"
+        '[{"code":"ETUD-01","estimated_score":12.5,"advice":"2 phrases de coaching concret pour le prof en citant explicitement ETUD-01."}, ...]\n'
+        "Élèves :\n" + "\n".join(compact_lines)
+    )
+
+    extracted_text, raw_response_str, source = call_gemini_generate(prompt, max_tokens=2048)
+    parsed_list = extract_json_from_llm(extracted_text) if extracted_text else None
+    parsed_by_code: Dict[str, Dict[str, Any]] = {}
+    if isinstance(parsed_list, dict):
+        if "students" in parsed_list and isinstance(parsed_list["students"], list):
+            parsed_list = parsed_list["students"]
+        elif "code" in parsed_list:
+            parsed_list = [parsed_list]
+    if isinstance(parsed_list, list):
+        for item in parsed_list:
+            if isinstance(item, dict) and item.get("code"):
+                norm_code = str(item["code"]).strip().upper()
+                parsed_by_code[norm_code] = item
+
+    now_dt = datetime.utcnow()
+    results = []
+    sim_items_for_raw = []
+
+    for code, s, alert, records in eligible:
+        item = parsed_by_code.get(code.upper())
+        # Support variante sans zéro (ETUD-1 vs ETUD-01)
+        if not item:
+            short_code = re.sub(r"^ETUD-0*(\d+)$", r"ETUD-\1", code.upper())
+            for k, v in parsed_by_code.items():
+                if re.sub(r"^ETUD-0*(\d+)$", r"ETUD-\1", k) == short_code:
+                    item = v
+                    break
+
+        coaching_anon = ""
+        est_score: Optional[float] = None
+        if item:
+            coaching_anon = str(item.get("advice") or item.get("coaching") or "").strip()
+            raw_est = item.get("estimated_score")
+            if raw_est is not None:
+                try:
+                    est_score = round(max(0.0, min(20.0, float(raw_est))), 2)
+                except Exception:
+                    est_score = None
+
+        if not coaching_anon:
+            coaching_anon, fallback_est = build_fallback_student_coaching(code, s, alert, records)
+            if est_score is None:
+                est_score = fallback_est
+
+        if est_score is None:
+            est_score = compute_default_estimated_future_score(alert.average_score, alert.recent_trend)
+
+        sim_items_for_raw.append({
+            "code": code,
+            "estimated_score": est_score,
+            "advice_anonyme": coaching_anon,
+        })
+
+        # Désanonymisation : remplace ETUD-XX par le nom réel de l'étudiant
+        personalized_coaching = deanonymize_text(coaching_anon, code_to_name)
+        if s.full_name not in personalized_coaching:
+            personalized_coaching = f"[{s.full_name}] {personalized_coaching}"
+
+        per_student_raw = raw_response_str or json.dumps({
+            "statut": "simulation_lot_active",
+            "cle_api_presente": bool(GEMINI_API_KEY),
+            "modele_configure": GEMINI_MODEL,
+            "code_attribue": code,
+            "estimated_score": est_score,
+            "advice_anonyme": coaching_anon,
+        }, indent=2, ensure_ascii=False)
+
+        # Overwrite systématique de tous les élèves du lot
+        alert.recommendation = personalized_coaching
+        alert.estimated_future_score = est_score
+        alert.ai_prompt = prompt
+        alert.ai_raw_response = per_student_raw
+        alert.ai_coaching_updated_at = now_dt
+        alert.updated_at = now_dt
+
+        results.append({
+            "student_id": s.id,
+            "full_name": s.full_name,
+            "code_anonyme": code,
+            "generated": True,
+            "source": source,
+            "ai_coaching": personalized_coaching,
+            "estimated_future_score": est_score,
+            "updated_at": now_dt.strftime("%d/%m/%Y à %H:%M"),
+        })
+
+    db.commit()
+    return {
+        "generated_count": len(results),
+        "total_students": len(students),
+        "model": GEMINI_MODEL,
+        "source": source,
+        "prompt_used": prompt,
+        "results": results,
+    }
+
+
+def generate_class_ai_review(db: Session, class_name: str = "ALL") -> Dict[str, Any]:
+    """
+    Génère un Bilan IA global de la performance d'une classe (ou de toute la promotion si class_name == 'ALL').
+    Envoie un prompt compact anonymisé (ETUD-01, ETUD-02...) et désanonymise les noms d'élèves à la réception.
+    """
+    norm_class = (class_name or "ALL").strip() or "ALL"
+    stu_q = db.query(User).filter(User.role == "ETUDIANT")
+    if norm_class != "ALL":
+        stu_q = stu_q.filter(User.class_name == norm_class)
+    students = stu_q.order_by(User.full_name.asc()).all()
+
+    code_to_name: Dict[str, str] = {}
+    compact_lines: List[str] = []
+    avgs: List[float] = []
+    est_scores: List[float] = []
+    course_scores: Dict[str, List[float]] = {}
+    risk_counts = {"CRITIQUE": 0, "VIGILANCE": 0, "STABLE": 0}
+
+    idx = 1
+    for s in students:
+        recompute_student_analytics(db, s.id)
+        records = (
+            db.query(XAPIStatementRecord)
+            .filter(XAPIStatementRecord.student_id == s.id)
+            .order_by(XAPIStatementRecord.timestamp.asc())
+            .all()
+        )
+        alert = db.query(StudentAlert).filter(StudentAlert.student_id == s.id).first()
+        if not records or not alert:
+            continue
+        code = f"ETUD-{idx:02d}"
+        idx += 1
+        code_to_name[code] = s.full_name
+        compact_lines.append(build_compact_student_line(code, s, alert, records))
+        avgs.append(alert.average_score)
+        est_val = (
+            alert.estimated_future_score
+            if alert.estimated_future_score is not None
+            else compute_default_estimated_future_score(alert.average_score, alert.recent_trend)
+        )
+        if est_val is not None:
+            est_scores.append(est_val)
+        if alert.risk_level in risk_counts:
+            risk_counts[alert.risk_level] += 1
+        for r in records:
+            course_scores.setdefault(r.course_name, []).append(r.score_raw)
+
+    class_label = "Toutes les promotions" if norm_class == "ALL" else norm_class
+    if not avgs:
+        return {
+            "class_name": norm_class,
+            "class_label": class_label,
+            "generated": False,
+            "review_text": "Aucune donnée d'évaluation disponible pour cette classe.",
+            "estimated_class_future_avg": None,
+            "prompt_used": "",
+            "raw_response": "",
+            "updated_at": None,
+        }
+
+    current_class_avg = round(sum(avgs) / len(avgs), 2)
+    default_future_avg = round(sum(est_scores) / len(est_scores), 2) if est_scores else current_class_avg
+    course_avgs = {c: round(sum(v) / len(v), 2) for c, v in sorted(course_scores.items())}
+    course_summary = ", ".join(f"{c}:{v}/20" for c, v in course_avgs.items())
+
+    prompt = (
+        f"Tu es conseiller pédagogique IA. Analyse la performance globale de la classe « {class_label} » ({len(avgs)} élèves évalués).\n"
+        f"Stats classe : Moyenne={current_class_avg}/20 | Critique={risk_counts['CRITIQUE']} | Vigilance={risk_counts['VIGILANCE']} | Stable={risk_counts['STABLE']} | Matières=[{course_summary}]\n"
+        "Profils anonymisés :\n" + "\n".join(compact_lines) + "\n\n"
+        "Réponds UNIQUEMENT en JSON strict :\n"
+        '{"estimated_class_average":12.4,"review":"Bilan structuré en 3-4 phrases : dynamique globale de la classe, matières fortes/fragiles, et actions prioritaires pour le mois prochain en citant les codes ETUD-XX des profils clés."}'
+    )
+
+    extracted_text, raw_response_str, source = call_gemini_generate(prompt, max_tokens=1024)
+    review_anon = ""
+    est_class_avg: Optional[float] = None
+
+    if extracted_text:
+        parsed = extract_json_from_llm(extracted_text)
+        if isinstance(parsed, dict):
+            review_anon = str(parsed.get("review") or parsed.get("summary") or "").strip()
+            raw_est = parsed.get("estimated_class_average")
+            if raw_est is not None:
+                try:
+                    est_class_avg = round(max(0.0, min(20.0, float(raw_est))), 2)
+                except Exception:
+                    est_class_avg = None
+        if not review_anon:
+            review_anon = extracted_text
+
+    if not review_anon:
+        weakest_c = min(course_avgs, key=course_avgs.get) if course_avgs else "-"
+        strongest_c = max(course_avgs, key=course_avgs.get) if course_avgs else "-"
+        crit_codes = [c for c, _, a, _ in [(f"ETUD-{i+1:02d}", st, db.query(StudentAlert).filter(StudentAlert.student_id == st.id).first(), []) for i, st in enumerate(students)] if a and a.risk_level == "CRITIQUE"]
+        top_codes = [c for c, _, a, _ in [(f"ETUD-{i+1:02d}", st, db.query(StudentAlert).filter(StudentAlert.student_id == st.id).first(), []) for i, st in enumerate(students)] if a and a.risk_level == "STABLE" and a.average_score >= 15.0]
+        crit_mention = f" (attention prioritaire sur {', '.join(crit_codes[:3])})" if crit_codes else ""
+        top_mention = f" en s'appuyant sur des éléments moteurs comme {', '.join(top_codes[:2])}" if top_codes else ""
+
+        review_anon = (
+            f"La promotion « {class_label} » affiche une moyenne globale de {current_class_avg}/20 "
+            f"avec {risk_counts['STABLE']} profil(s) stable(s), {risk_counts['VIGILANCE']} en vigilance et {risk_counts['CRITIQUE']} en situation critique{crit_mention}. "
+            f"Les résultats sont particulièrement solides en {strongest_c} ({course_avgs.get(strongest_c, current_class_avg)}/20), "
+            f"tandis que le module {weakest_c} ({course_avgs.get(weakest_c, current_class_avg)}/20) concentre les principales fragilités méthodologiques. "
+            f"Plan d'action recommandé pour le mois prochain : organiser une séance de remédiation ciblée en {weakest_c} et déployer un tutorat par les pairs{top_mention} "
+            f"afin de porter la moyenne de classe vers l'estimation de {default_future_avg}/20 à M+1."
+        )
+        est_class_avg = default_future_avg
+        if not raw_response_str:
+            raw_response_str = json.dumps({
+                "statut": "simulation_bilan_classe_active",
+                "classe": class_label,
+                "estimated_class_average": est_class_avg,
+                "review_anonyme": review_anon,
+            }, indent=2, ensure_ascii=False)
+
+    if est_class_avg is None:
+        est_class_avg = default_future_avg
+
+    personalized_review = deanonymize_text(review_anon, code_to_name)
+    now_dt = datetime.utcnow()
+
+    review_row = db.query(ClassAIReview).filter(ClassAIReview.class_name == norm_class).first()
+    if not review_row:
+        review_row = ClassAIReview(
+            class_name=norm_class,
+            review_text=personalized_review,
+            estimated_class_future_avg=est_class_avg,
+            ai_prompt=prompt,
+            ai_raw_response=raw_response_str,
+            updated_at=now_dt,
+        )
+        db.add(review_row)
+    else:
+        review_row.review_text = personalized_review
+        review_row.estimated_class_future_avg = est_class_avg
+        review_row.ai_prompt = prompt
+        review_row.ai_raw_response = raw_response_str
+        review_row.updated_at = now_dt
+    db.commit()
+
+    return {
+        "class_name": norm_class,
+        "class_label": class_label,
+        "generated": True,
+        "source": source,
+        "review_text": personalized_review,
+        "estimated_class_future_avg": est_class_avg,
+        "current_class_avg": current_class_avg,
+        "prompt_used": prompt,
+        "raw_response": raw_response_str,
+        "updated_at": now_dt.strftime("%d/%m/%Y à %H:%M"),
     }
 
 
@@ -457,6 +901,7 @@ def seed_initial_data():
                 Base.metadata.create_all(bind=engine)
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS class_name VARCHAR(120) DEFAULT 'Générale';"))
+                    conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS estimated_future_score FLOAT;"))
                     conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_prompt TEXT;"))
                     conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_raw_response TEXT;"))
                     conn.execute(text("ALTER TABLE student_alerts ADD COLUMN IF NOT EXISTS ai_coaching_updated_at TIMESTAMP;"))
@@ -1011,6 +1456,8 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
         # Nettoyage rétrocompatible : si une ancienne phrase statique d'avant la mise à jour Gemini est présente sans tag ni date IA
         if a and ai_text and not a.ai_coaching_updated_at and ("Solution proposée :" in ai_text):
             ai_text = ""
+        est_future = a.estimated_future_score if (a and a.estimated_future_score is not None) else None
+        default_est = compute_default_estimated_future_score(a.average_score, a.recent_trend) if a else None
         student_rows.append({
             "student_id": s.id,
             "full_name": s.full_name,
@@ -1021,6 +1468,8 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
             "statements_count": a.statements_count if a else 0,
             "risk_level": a.risk_level if a else "SANS_DONNEES",
             "weakest_course": a.weakest_course if a else "-",
+            "estimated_future_score": est_future,
+            "default_estimated_future_score": default_est,
             "ai_coaching": ai_text,
             "has_ai_coaching": bool(ai_text),
             "ai_prompt": (a.ai_prompt if a and a.ai_prompt else None),
@@ -1051,15 +1500,41 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
 
     scored_vals = [r["average_score"] for r in student_rows if r["average_score"] is not None]
     class_avg = round(sum(scored_vals) / len(scored_vals), 2) if scored_vals else 0.0
+    est_vals = [
+        (r["estimated_future_score"] if r["estimated_future_score"] is not None else r["default_estimated_future_score"])
+        for r in student_rows
+        if (r["estimated_future_score"] is not None or r["default_estimated_future_score"] is not None)
+    ]
+    est_class_avg = round(sum(est_vals) / len(est_vals), 2) if est_vals else 0.0
+
+    # Bilans IA de classe existants
+    class_reviews_map = {}
+    try:
+        for cr in db.query(ClassAIReview).all():
+            class_reviews_map[cr.class_name] = {
+                "class_name": cr.class_name,
+                "review_text": cr.review_text,
+                "estimated_class_future_avg": cr.estimated_class_future_avg,
+                "prompt_used": cr.ai_prompt,
+                "raw_response": cr.ai_raw_response,
+                "updated_at": cr.updated_at.strftime("%d/%m/%Y à %H:%M") if cr.updated_at else None,
+            }
+    except Exception:
+        pass
+
+    available_classes = sorted(list({r["class_name"] for r in student_rows if r["class_name"]}))
 
     return {
         "ai_info": {
             "active": True,
             "label": "Assistant Pédagogique IA activé",
         },
+        "classes": available_classes,
+        "class_reviews": class_reviews_map,
         "summary": {
             "total_students": len(students),
             "class_average": class_avg,
+            "estimated_future_class_average": est_class_avg,
             "critical_count": sum(1 for r in student_rows if r["risk_level"] == "CRITIQUE"),
             "vigilance_count": sum(1 for r in student_rows if r["risk_level"] == "VIGILANCE"),
             "stable_count": sum(1 for r in student_rows if r["risk_level"] == "STABLE"),
@@ -1080,28 +1555,208 @@ def get_teacher_analytics(current: User = Depends(get_current_user), db: Session
 
 
 @app.post("/api/teacher/ai-coaching/all")
-def trigger_ai_coaching_all_students(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def trigger_ai_coaching_all_students(
+    req: Optional[ClassActionRequest] = None,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
-    Déclenchement manuel global : génère les recommandations de coaching IA Gemini
-    pour tous les élèves disposant de notes dans l'établissement.
+    Déclenchement manuel global (en UNE SEULE requête groupée compacte) :
+    Génère et écrase les recommandations IA + notes futures estimées pour tous les élèves
+    (ou ceux de la classe choisie), avec anonymisation ETUD-XX à l'envoi et personnalisation à la réception.
     """
     if current.role not in ("ENSEIGNANT", "ADMIN"):
         raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
 
-    students = db.query(User).filter(User.role == "ETUDIANT").order_by(User.full_name.asc()).all()
-    results = []
-    generated_count = 0
+    stu_q = db.query(User).filter(User.role == "ETUDIANT")
+    if req and req.class_name and req.class_name != "ALL":
+        stu_q = stu_q.filter(User.class_name == req.class_name)
+    students = stu_q.order_by(User.full_name.asc()).all()
+    return generate_batch_ai_coaching(db, students)
+
+
+@app.post("/api/teacher/ai-class-review")
+def trigger_ai_class_review(
+    req: ClassActionRequest,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Génère ou actualise la Review IA de la performance globale de la classe sélectionnée
+    (ou de l'ensemble des promotions si class_name == 'ALL').
+    """
+    if current.role not in ("ENSEIGNANT", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
+
+    target_class = (req.class_name or "ALL").strip() or "ALL"
+    return generate_class_ai_review(db, target_class)
+
+
+@app.post("/api/teacher/class-report")
+def build_complete_class_report(
+    req: ClassActionRequest,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Prépare toutes les données pour le Rapport PDF Complet d'une classe :
+    - Si des élèves de la classe n'ont pas encore de conseil IA ou de note future estimée,
+      lance automatiquement la génération IA groupée pour ces élèves.
+    - Si le bilan IA global de la classe n'est pas encore généré (ou si force_regenerate=True),
+      le génère automatiquement.
+    - Retourne l'intégralité des métriques, bilans par matière, projections à 30 jours,
+      commentaires IA et appréciations enseignant pour construire le PDF.
+    """
+    if current.role not in ("ENSEIGNANT", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Accès réservé au corps enseignant")
+
+    target_class = (req.class_name or "ALL").strip() or "ALL"
+    stu_q = db.query(User).filter(User.role == "ETUDIANT")
+    if target_class != "ALL":
+        stu_q = stu_q.filter(User.class_name == target_class)
+    students = stu_q.order_by(User.full_name.asc()).all()
+
+    if not students:
+        raise HTTPException(status_code=404, detail="Aucun étudiant trouvé dans cette classe.")
+
+    # 1. Recalculer les stats de base et identifier les élèves sans conseil IA ou sans note future estimée
+    missing_students: List[User] = []
     for s in students:
-        res = generate_student_ai_coaching(db, s)
-        results.append(res)
-        if res.get("generated"):
-            generated_count += 1
+        recompute_student_analytics(db, s.id)
+        a = db.query(StudentAlert).filter(StudentAlert.student_id == s.id).first()
+        has_grades = db.query(func.count(XAPIStatementRecord.id)).filter(XAPIStatementRecord.student_id == s.id).scalar() or 0
+        if has_grades > 0:
+            ai_txt = (a.recommendation or "").strip() if a else ""
+            if a and ai_txt and not a.ai_coaching_updated_at and ("Solution proposée :" in ai_txt):
+                ai_txt = ""
+            if req.force_regenerate or not a or not ai_txt or a.estimated_future_score is None:
+                missing_students.append(s)
+
+    if missing_students:
+        generate_batch_ai_coaching(db, missing_students)
+
+    # 2. Vérifier / générer la Review IA globale de la classe
+    class_review_row = db.query(ClassAIReview).filter(ClassAIReview.class_name == target_class).first()
+    if req.force_regenerate or not class_review_row or not (class_review_row.review_text or "").strip():
+        class_review_data = generate_class_ai_review(db, target_class)
+    else:
+        class_review_data = {
+            "class_name": class_review_row.class_name,
+            "class_label": "Toutes les promotions" if target_class == "ALL" else target_class,
+            "review_text": class_review_row.review_text,
+            "estimated_class_future_avg": class_review_row.estimated_class_future_avg,
+            "updated_at": class_review_row.updated_at.strftime("%d/%m/%Y à %H:%M") if class_review_row.updated_at else None,
+        }
+
+    # 3. Assembler toutes les données détaillées de la classe pour le PDF
+    student_ids = [s.id for s in students]
+    alerts_map = {
+        a.student_id: a
+        for a in db.query(StudentAlert).filter(StudentAlert.student_id.in_(student_ids)).all()
+    }
+    all_records = (
+        db.query(XAPIStatementRecord)
+        .filter(XAPIStatementRecord.student_id.in_(student_ids))
+        .order_by(XAPIStatementRecord.timestamp.asc())
+        .all()
+    )
+    records_by_student: Dict[int, List[XAPIStatementRecord]] = {}
+    course_scores: Dict[str, List[float]] = {}
+    all_raw_scores: List[float] = []
+
+    for r in all_records:
+        records_by_student.setdefault(r.student_id, []).append(r)
+        course_scores.setdefault(r.course_name, []).append(r.score_raw)
+        all_raw_scores.append(r.score_raw)
+
+    course_stats = []
+    for c_name, sc_list in sorted(course_scores.items()):
+        c_avg = round(sum(sc_list) / len(sc_list), 2)
+        c_pass = round((sum(1 for x in sc_list if x >= 10.0) / len(sc_list)) * 100, 1)
+        course_stats.append({
+            "course_name": c_name,
+            "average": c_avg,
+            "pass_rate": c_pass,
+            "min": min(sc_list),
+            "max": max(sc_list),
+            "count": len(sc_list),
+        })
+
+    student_reports = []
+    avgs_list: List[float] = []
+    est_list: List[float] = []
+    for s in students:
+        a = alerts_map.get(s.id)
+        s_recs = records_by_student.get(s.id, [])
+        avg_val = a.average_score if a else None
+        trend_val = a.recent_trend if a else 0.0
+        est_val = (
+            a.estimated_future_score
+            if (a and a.estimated_future_score is not None)
+            else compute_default_estimated_future_score(avg_val, trend_val)
+        )
+        if avg_val is not None:
+            avgs_list.append(avg_val)
+        if est_val is not None:
+            est_list.append(est_val)
+
+        stu_course_map: Dict[str, List[float]] = {}
+        for r in s_recs:
+            stu_course_map.setdefault(r.course_name, []).append(r.score_raw)
+        stu_course_avgs = {c: round(sum(v) / len(v), 2) for c, v in sorted(stu_course_map.items())}
+        future_curve = compute_student_future_curve(s_recs, avg_val, trend_val, est_val)
+
+        student_reports.append({
+            "student_id": s.id,
+            "full_name": s.full_name,
+            "email": s.email,
+            "class_name": getattr(s, "class_name", "Générale") or "Générale",
+            "average_score": avg_val,
+            "recent_trend": trend_val,
+            "statements_count": len(s_recs),
+            "risk_level": a.risk_level if a else "SANS_DONNEES",
+            "weakest_course": a.weakest_course if a else "-",
+            "estimated_future_score": est_val,
+            "ai_coaching": (a.recommendation if a and a.recommendation else "Aucune note enregistrée."),
+            "teacher_appreciation": (a.teacher_appreciation if a and a.teacher_appreciation else ""),
+            "course_averages": stu_course_avgs,
+            "future_curve": future_curve,
+        })
+
+    priority = {"CRITIQUE": 0, "VIGILANCE": 1, "STABLE": 2, "SANS_DONNEES": 3}
+    student_reports.sort(key=lambda x: (priority.get(x["risk_level"], 9), x["average_score"] or 99))
+
+    class_avg = round(sum(avgs_list) / len(avgs_list), 2) if avgs_list else 0.0
+    est_class_avg = (
+        class_review_data.get("estimated_class_future_avg")
+        or (round(sum(est_list) / len(est_list), 2) if est_list else class_avg)
+    )
+    pass_rate = round((sum(1 for sc in all_raw_scores if sc >= 10.0) / len(all_raw_scores)) * 100, 1) if all_raw_scores else 0.0
 
     return {
-        "generated_count": generated_count,
-        "total_students": len(students),
-        "model": GEMINI_MODEL,
-        "results": results,
+        "institution_name": INSTITUTION_NAME,
+        "tenant_slug": TENANT_SLUG,
+        "class_name": target_class,
+        "class_label": "Toutes les promotions" if target_class == "ALL" else target_class,
+        "generated_at": datetime.utcnow().strftime("%d/%m/%Y à %H:%M"),
+        "generated_by": current.full_name,
+        "summary": {
+            "total_students": len(students),
+            "evaluated_students": len(avgs_list),
+            "total_evaluations": len(all_raw_scores),
+            "class_average": class_avg,
+            "estimated_future_class_average": est_class_avg,
+            "expected_progression": round(est_class_avg - class_avg, 2),
+            "pass_rate": pass_rate,
+            "highest_score": max(all_raw_scores) if all_raw_scores else 0.0,
+            "lowest_score": min(all_raw_scores) if all_raw_scores else 0.0,
+            "critical_count": sum(1 for r in student_reports if r["risk_level"] == "CRITIQUE"),
+            "vigilance_count": sum(1 for r in student_reports if r["risk_level"] == "VIGILANCE"),
+            "stable_count": sum(1 for r in student_reports if r["risk_level"] == "STABLE"),
+        },
+        "class_ai_review": class_review_data,
+        "course_stats": course_stats,
+        "students": student_reports,
     }
 
 
@@ -1213,19 +1868,7 @@ def get_teacher_chart_data(
         for a in db.query(StudentAlert).filter(StudentAlert.student_id.in_(student_ids)).all()
     } if student_ids else {}
 
-    students_summary = []
-    for s in students:
-        a = alerts_map.get(s.id)
-        students_summary.append({
-            "id": s.id,
-            "full_name": s.full_name,
-            "class_name": s.class_name or "Générale",
-            "average_score": a.average_score if a else None,
-            "recent_trend": a.recent_trend if a else 0.0,
-            "risk_level": a.risk_level if a else "SANS_DONNEES",
-            "weakest_course": a.weakest_course if a else "-",
-        })
-
+    # 3. Requête des statements xAPI triés par date chronologique
     if not student_ids:
         return {
             "classes": available_classes,
@@ -1237,6 +1880,7 @@ def get_teacher_chart_data(
             "overall_stats": {
                 "total_notes": 0,
                 "overall_average": 0.0,
+                "estimated_future_average": 0.0,
                 "pass_rate": 0.0,
                 "highest_score": 0.0,
                 "lowest_score": 0.0,
@@ -1244,7 +1888,6 @@ def get_teacher_chart_data(
             }
         }
 
-    # 3. Requête des statements xAPI triés par date chronologique
     stmt_q = (
         db.query(XAPIStatementRecord, User)
         .join(User, User.id == XAPIStatementRecord.student_id)
@@ -1254,6 +1897,36 @@ def get_teacher_chart_data(
         stmt_q = stmt_q.filter(XAPIStatementRecord.course_name == course_name)
 
     records = stmt_q.order_by(XAPIStatementRecord.timestamp.asc()).all()
+    records_by_student: Dict[int, List[XAPIStatementRecord]] = {}
+    for rec, usr in records:
+        records_by_student.setdefault(usr.id, []).append(rec)
+
+    students_summary = []
+    est_scores_all: List[float] = []
+    for s in students:
+        a = alerts_map.get(s.id)
+        s_recs = records_by_student.get(s.id, [])
+        avg_val = a.average_score if a else None
+        trend_val = a.recent_trend if a else 0.0
+        est_val = (
+            a.estimated_future_score
+            if (a and a.estimated_future_score is not None)
+            else compute_default_estimated_future_score(avg_val, trend_val)
+        )
+        if est_val is not None:
+            est_scores_all.append(est_val)
+        future_curve = compute_student_future_curve(s_recs, avg_val, trend_val, est_val)
+        students_summary.append({
+            "id": s.id,
+            "full_name": s.full_name,
+            "class_name": s.class_name or "Générale",
+            "average_score": avg_val,
+            "recent_trend": trend_val,
+            "estimated_future_score": est_val,
+            "risk_level": a.risk_level if a else "SANS_DONNEES",
+            "weakest_course": a.weakest_course if a else "-",
+            "future_curve": future_curve,
+        })
 
     formatted_statements = []
     course_scores: Dict[str, List[float]] = {}
@@ -1308,6 +1981,7 @@ def get_teacher_chart_data(
     overall_stats = {
         "total_notes": len(all_scores),
         "overall_average": round(sum(all_scores) / len(all_scores), 2) if all_scores else 0.0,
+        "estimated_future_average": round(sum(est_scores_all) / len(est_scores_all), 2) if est_scores_all else 0.0,
         "pass_rate": round((sum(1 for sc in all_scores if sc >= 10.0) / len(all_scores)) * 100, 1) if all_scores else 0.0,
         "highest_score": max(all_scores) if all_scores else 0.0,
         "lowest_score": min(all_scores) if all_scores else 0.0,
