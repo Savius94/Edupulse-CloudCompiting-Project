@@ -8,6 +8,74 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    select.edupulse-select {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      background-color: #ffffff;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-position: right 0.65rem center;
+      background-repeat: no-repeat;
+      background-size: 1.1rem 1.1rem;
+      padding-right: 2.35rem;
+      border-radius: 0.75rem;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      cursor: pointer;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    }
+    select.edupulse-select:hover {
+      border-color: #94a3b8;
+      background-color: #f8fafc;
+    }
+    select.edupulse-select:focus {
+      outline: none;
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+      background-color: #ffffff;
+    }
+    select.edupulse-select-indigo {
+      border-color: #c7d2fe;
+      background-color: #eef2ff;
+      color: #312e81;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%234f46e5' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    }
+    select.edupulse-select-indigo:hover {
+      border-color: #818cf8;
+      background-color: #e0e7ff;
+    }
+    select.edupulse-select-emerald {
+      border-color: #a7f3d0;
+      background-color: #ecfdf5;
+      color: #065f46;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23059669' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    }
+    select.edupulse-select-emerald:hover {
+      border-color: #34d399;
+      background-color: #d1fae5;
+    }
+    select.edupulse-select-emerald:focus {
+      border-color: #059669;
+      box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
+      background-color: #ffffff;
+    }
+    select.edupulse-select-amber:focus {
+      border-color: #d97706;
+      box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15);
+    }
+    select.edupulse-select-sm {
+      background-position: right 0.55rem center;
+      background-size: 0.95rem 0.95rem;
+      padding-right: 2rem;
+      border-radius: 0.65rem;
+    }
+    select.edupulse-select option {
+      background-color: #ffffff;
+      color: #0f172a;
+      font-weight: 500;
+    }
+  </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
 
@@ -207,7 +275,7 @@
           <!-- Filtre par matière pour l'étudiant -->
           <div class="flex items-center gap-2">
             <label class="text-xs font-semibold text-slate-600">Matière :</label>
-            <select id="stu-chart-filter-course" onchange="renderStudentChart()" class="text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-300 bg-white">
+            <select id="stu-chart-filter-course" onchange="renderStudentChart()" class="edupulse-select edupulse-select-sm edupulse-select-indigo text-xs font-semibold px-3 py-1.5">
               <option value="ALL">Toutes mes matières</option>
             </select>
           </div>
@@ -242,7 +310,7 @@
           <form onsubmit="handleSendXAPI(event)" class="space-y-4">
             <div>
               <label class="block text-xs font-semibold text-slate-700 mb-1">Matière / Module</label>
-              <select id="xapi-course" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+              <select id="xapi-course" class="edupulse-select w-full px-3.5 py-2.5 text-sm font-medium text-slate-800">
                 <option value="Algorithmique & Python">Algorithmique & Python</option>
                 <option value="Bases de Données SQL">Bases de Données SQL</option>
                 <option value="Architecture Cloud">Architecture Cloud</option>
@@ -252,7 +320,7 @@
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-700 mb-1">Type d'activité (Verbe xAPI)</label>
-              <select id="xapi-verb" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+              <select id="xapi-verb" class="edupulse-select w-full px-3.5 py-2.5 text-sm font-medium text-slate-800">
                 <option value="completed">Examen / Évaluation complétée (completed)</option>
                 <option value="attempted">Quiz d'entraînement tenté (attempted)</option>
                 <option value="passed">TP validé (passed)</option>
@@ -346,7 +414,7 @@
           <div class="flex flex-wrap items-center gap-2.5 shrink-0">
             <div class="flex items-center gap-1.5">
               <label class="text-xs font-semibold text-slate-600">Classe :</label>
-              <select id="report-class-select" onchange="onReportClassSelectChange()" class="text-xs font-bold px-3 py-2 rounded-xl border border-slate-300 bg-white">
+              <select id="report-class-select" onchange="onReportClassSelectChange()" class="edupulse-select edupulse-select-sm edupulse-select-indigo text-xs font-bold px-3 py-2">
                 <option value="ALL">Toutes les promotions</option>
               </select>
             </div>
@@ -401,13 +469,13 @@
           <div class="flex flex-wrap items-center gap-3">
             <div class="flex items-center gap-2">
               <label class="text-xs font-semibold text-slate-600">Promotion :</label>
-              <select id="teacher-filter-class" onchange="onTeacherFilterChange()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white">
+              <select id="teacher-filter-class" onchange="onTeacherFilterChange()" class="edupulse-select edupulse-select-sm edupulse-select-emerald text-xs font-semibold px-3 py-2">
                 <option value="ALL">Toutes les promotions</option>
               </select>
             </div>
             <div class="flex items-center gap-2">
               <label class="text-xs font-semibold text-slate-600">Matière :</label>
-              <select id="teacher-filter-course" onchange="onTeacherFilterChange()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white">
+              <select id="teacher-filter-course" onchange="onTeacherFilterChange()" class="edupulse-select edupulse-select-sm edupulse-select-emerald text-xs font-semibold px-3 py-2">
                 <option value="ALL">Toutes les matières</option>
               </select>
             </div>
@@ -465,7 +533,7 @@
         <!-- Sous-contrôles : Mode Focus Élève individuel -->
         <div id="subcontrols-single" class="hidden p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center gap-3">
           <label class="text-xs font-bold text-slate-700">Sélectionner un étudiant :</label>
-          <select id="select-single-student" onchange="renderTeacherChart()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white min-w-[240px]">
+          <select id="select-single-student" onchange="renderTeacherChart()" class="edupulse-select edupulse-select-sm edupulse-select-emerald text-xs font-semibold px-3 py-2 min-w-[240px]">
           </select>
           <span id="single-student-info" class="text-xs font-bold px-3 py-1 rounded-full"></span>
         </div>
@@ -607,7 +675,7 @@
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-700 mb-1">Rôle dans l'établissement</label>
-                <select id="new-user-role" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                <select id="new-user-role" class="edupulse-select edupulse-select-amber w-full px-3.5 py-2.5 text-sm font-medium text-slate-800">
                   <option value="ETUDIANT">🎓 Étudiant (Saisie & suivi des notes)</option>
                   <option value="ENSEIGNANT">📊 Enseignant (Analyse & détection)</option>
                   <option value="ADMIN">🏛️ Administrateur (Gestion des comptes)</option>
