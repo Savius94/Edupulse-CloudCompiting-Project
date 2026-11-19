@@ -617,11 +617,28 @@
       </div>
 
       <!-- Liste de tous les Stacks Docker Swarm -->
-      <div class="bg-white p-6 rounded-2xl border border-slate-200">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-          <h2 class="text-base font-bold text-slate-900">Stacks d'établissements déployés (Contrôle Scalabilité, Élasticité & Agilité)</h2>
-          <span class="text-xs text-slate-500">Utilisez <strong>- / +</strong> pour scaler manuellement les réplicas ou activez l'<strong>Auto-Scale</strong></span>
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-bold text-slate-900">Stacks d'établissements déployés (Contrôle Scalabilité, Élasticité & Agilité)</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Utilisez <strong>- / +</strong> pour scaler les réplicas, <strong>🛠️ Maintenance</strong> pour couper proprement l'accès pendant une intervention, ou <strong>🔄 Rolling Update</strong> pour déployer sans coupure.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <button id="btn-maint-all-on" onclick="saGlobalMaintenance(true, this)"
+              class="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition cursor-pointer">
+              🛠️ Maintenance Globale
+            </button>
+            <button id="btn-maint-all-off" onclick="saGlobalMaintenance(false, this)"
+              class="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition cursor-pointer">
+              ✅ Fin Maintenance Globale
+            </button>
+            <button id="btn-rolling-update-all" onclick="saGlobalRollingUpdate(this)"
+              class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition cursor-pointer">
+              🔄 Rolling Update Global (Tous)
+            </button>
+          </div>
         </div>
+        <div id="sa-stacks-feedback" class="hidden text-xs p-3 rounded-xl border font-medium"></div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead>
@@ -1065,6 +1082,7 @@
 
       container.innerHTML = tenants.map(t => {
         const isActive = t.status === 'RUNNING';
+        const isMaint = Boolean(t.maintenance_mode);
         const primaryUrl = getTenantTargetUrl(t, 'primary');
         const directUrl = getTenantTargetUrl(t, 'direct');
         const displayDomain = `${t.slug}.edupulse.mnbll.fr`;
@@ -1073,10 +1091,10 @@
           <div class="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-md transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div class="space-y-1.5">
               <div class="flex items-center gap-2.5">
-                <span class="w-2.5 h-2.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-amber-500'}"></span>
+                <span class="w-2.5 h-2.5 rounded-full ${isMaint ? 'bg-amber-500 animate-pulse' : (isActive ? 'bg-emerald-500' : 'bg-slate-400')}"></span>
                 <h3 class="font-bold text-base text-slate-900">${t.institution_name}</h3>
-                <span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
-                  ${isActive ? 'En service' : 'Suspendu'}
+                <span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${isMaint ? 'bg-amber-100 text-amber-800' : (isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700')}">
+                  ${isMaint ? '🛠️ En maintenance' : (isActive ? 'En service' : 'Suspendu')}
                 </span>
               </div>
               <div class="flex flex-wrap items-center gap-2 pt-1">
@@ -1333,19 +1351,24 @@
                 </button>
               </td>
               <td class="py-3 px-2">
-                <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full ${t.status === 'RUNNING' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">
-                  ${t.status}
-                </span>
+                ${t.maintenance_mode
+                  ? `<span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">🛠️ MAINTENANCE</span>`
+                  : `<span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full ${t.status === 'RUNNING' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">${t.status}</span>`
+                }
               </td>
               <td class="py-3 px-2 text-right space-x-2 whitespace-nowrap">
-                <button onclick="saRollingUpdateTenant('${t.slug}')" title="Mise à jour sans coupure (Zero-Downtime Rolling Update)"
-                  class="text-xs font-semibold text-indigo-600 hover:underline">
+                <button onclick="saToggleMaintenance('${t.slug}', ${!t.maintenance_mode}, this)" title="${t.maintenance_mode ? 'Désactiver le mode maintenance et rétablir l\'accès' : 'Activer le mode maintenance (coupe l\'accès utilisateur avec message de maintenance)'}"
+                  class="text-xs font-semibold ${t.maintenance_mode ? 'text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200' : 'text-amber-700 hover:underline'} cursor-pointer">
+                  ${t.maintenance_mode ? '✅ Fin Maint.' : '🛠️ Maintenance'}
+                </button>
+                <button onclick="saRollingUpdateTenant('${t.slug}', this)" title="Mise à jour sans coupure (Zero-Downtime Rolling Update)"
+                  class="text-xs font-semibold text-indigo-600 hover:underline cursor-pointer">
                   🔄 Rolling Update
                 </button>
-                <button onclick="saToggleTenant('${t.slug}', '${t.status}')" class="text-xs font-semibold text-amber-600 hover:underline">
+                <button onclick="saToggleTenant('${t.slug}', '${t.status}')" class="text-xs font-semibold text-amber-600 hover:underline cursor-pointer">
                   ${t.status === 'RUNNING' ? 'Stopper' : 'Démarrer'}
                 </button>
-                <button onclick="saDeleteTenant('${t.slug}')" class="text-xs font-semibold text-rose-600 hover:underline">
+                <button onclick="saDeleteTenant('${t.slug}')" class="text-xs font-semibold text-rose-600 hover:underline cursor-pointer">
                   Supprimer
                 </button>
               </td>
@@ -1482,12 +1505,136 @@
       refreshSuperAdmin();
     }
 
-    async function saRollingUpdateTenant(slug) {
-      await fetch(`/api/superadmin/tenants/${slug}/rolling-update`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      refreshSuperAdmin();
+    function showStacksFeedback(msg, type = 'info') {
+      const fb = document.getElementById('sa-stacks-feedback');
+      if (!fb) return;
+      const styles = {
+        info: 'bg-indigo-50 border-indigo-200 text-indigo-800',
+        success: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+        warning: 'bg-amber-50 border-amber-200 text-amber-900',
+        error: 'bg-rose-50 border-rose-200 text-rose-700',
+      };
+      fb.className = `text-xs p-3 rounded-xl border font-medium ${styles[type] || styles.info}`;
+      fb.textContent = msg;
+      fb.classList.remove('hidden');
+    }
+
+    async function saRollingUpdateTenant(slug, btnEl) {
+      if (!confirm(`Lancer un Rolling Update Zero-Downtime sur « ${slug} » ?\n\nLes conteneurs seront mis à jour un par un avec l'image actuelle (sans coupure de service).`)) {
+        return;
+      }
+      const orig = btnEl ? btnEl.textContent : '';
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Update...'; }
+      showStacksFeedback(`⏳ Rolling Update en cours sur « ${slug} »...`, 'info');
+      try {
+        const res = await fetch(`/api/superadmin/tenants/${slug}/rolling-update`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showStacksFeedback(`❌ Échec du Rolling Update sur « ${slug} » : ${data.detail || 'Erreur serveur'}`, 'error');
+          return;
+        }
+        showStacksFeedback(`✅ Rolling Update déclenché avec succès sur « ${slug} » (${data.details && data.details.mode ? data.details.mode : 'SWARM'}).`, 'success');
+        await refreshSuperAdmin();
+      } catch (e) {
+        showStacksFeedback(`❌ Erreur réseau lors du Rolling Update sur « ${slug} ».`, 'error');
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig; }
+      }
+    }
+
+    async function saGlobalRollingUpdate(btnEl) {
+      if (!confirm("⚠️ ATTENTION — Rolling Update Global\n\nVous êtes sur le point de déclencher une mise à jour (Rolling Update) sur TOUS les établissements actifs (RUNNING) en même temps.\n\nLes réplicas seront renouvelés progressivement (start-first). Voulez-vous continuer ?")) {
+        return;
+      }
+      const orig = btnEl ? btnEl.textContent : '';
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Mise à jour globale...'; }
+      showStacksFeedback('⏳ Rolling Update Global en cours sur tous les établissements actifs...', 'info');
+      try {
+        const res = await fetch('/api/superadmin/tenants/rolling-update-all', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showStacksFeedback(`❌ Erreur lors du Rolling Update Global : ${data.detail || 'Erreur serveur'}`, 'error');
+          return;
+        }
+        const errCount = (data.errors || []).length;
+        showStacksFeedback(
+          `✅ Rolling Update Global terminé : ${data.updated_count || 0} établissement(s) mis à jour${errCount ? ` (${errCount} erreur(s))` : ''}.`,
+          errCount ? 'warning' : 'success'
+        );
+        await refreshSuperAdmin();
+      } catch (e) {
+        showStacksFeedback('❌ Erreur réseau lors du Rolling Update Global.', 'error');
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig; }
+      }
+    }
+
+    async function saToggleMaintenance(slug, enable, btnEl) {
+      const actionTxt = enable
+        ? `Activer le mode MAINTENANCE sur « ${slug} » ?\n\nLes étudiants, enseignants et admins de cet établissement seront bloqués et verront un écran de maintenance jusqu'à la fin de l'intervention.`
+        : `Lever le mode maintenance sur « ${slug} » et rétablir l'accès aux utilisateurs ?`;
+      if (!confirm(actionTxt)) return;
+
+      const orig = btnEl ? btnEl.textContent : '';
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ ...'; }
+      try {
+        const res = await fetch(`/api/superadmin/tenants/${slug}/maintenance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ enabled: enable })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showStacksFeedback(`❌ Erreur maintenance sur « ${slug} » : ${data.detail || 'Erreur serveur'}`, 'error');
+          return;
+        }
+        showStacksFeedback(
+          enable
+            ? `🛠️ Maintenance activée sur « ${slug} » : l'accès utilisateur est temporairement coupé.`
+            : `✅ Maintenance levée sur « ${slug} » : l'accès est rétabli.`,
+          enable ? 'warning' : 'success'
+        );
+        await refreshSuperAdmin();
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig; }
+      }
+    }
+
+    async function saGlobalMaintenance(enable, btnEl) {
+      const warnTxt = enable
+        ? "⚠️ ATTENTION — Maintenance Globale\n\nVous allez activer le mode maintenance sur TOUS les établissements.\nTous les utilisateurs (étudiants, enseignants, admins) auront l'accès bloqué avec un message de maintenance jusqu'à réouverture.\n\nContinuer ?"
+        : "Désactiver le mode maintenance sur TOUS les établissements et rétablir l'accès général ?";
+      if (!confirm(warnTxt)) return;
+
+      const orig = btnEl ? btnEl.textContent : '';
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ En cours...'; }
+      try {
+        const res = await fetch('/api/superadmin/tenants/maintenance-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ enabled: enable })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showStacksFeedback(`❌ Erreur lors de la maintenance globale : ${data.detail || 'Erreur serveur'}`, 'error');
+          return;
+        }
+        showStacksFeedback(
+          enable
+            ? `🛠️ Maintenance globale activée sur ${data.count || 0} établissement(s).`
+            : `✅ Fin de maintenance globale : accès rétabli sur ${data.count || 0} établissement(s).`,
+          enable ? 'warning' : 'success'
+        );
+        await refreshSuperAdmin();
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig; }
+      }
     }
 
     async function saSimulateLoad(cpuLoad) {

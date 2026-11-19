@@ -103,6 +103,7 @@ class TenantStack(Base):
     max_replicas = Column(Integer, nullable=False, default=4)
     autoscale_enabled = Column(Integer, nullable=False, default=1)
     orchestrator = Column(String(30), nullable=False, default="SWARM")
+    maintenance_mode = Column(Integer, nullable=False, default=0)
     owner_id = Column(Integer, ForeignKey("portal_users.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -383,6 +384,11 @@ class AIConfigRequest(BaseModel):
     clear_override: bool = False
 
 
+class MaintenanceRequest(BaseModel):
+    enabled: Optional[bool] = None
+    message: Optional[str] = None
+
+
 # =============================================================================
 # 5. ORCHESTRATEUR DOCKER SWARM & DOCKER COMPOSE (SCALABILITY, ELASTICITY, AGILITY)
 # =============================================================================
@@ -523,6 +529,7 @@ def serialize_tenant(t: TenantStack, owner_email: Optional[str] = None) -> dict:
         "min_replicas": getattr(t, "min_replicas", None) or rules["min_replicas"],
         "max_replicas": getattr(t, "max_replicas", None) or rules["max_replicas"],
         "autoscale_enabled": bool(getattr(t, "autoscale_enabled", 1)),
+        "maintenance_mode": bool(getattr(t, "maintenance_mode", 0)),
         "orchestrator": "SWARM" if is_swarm_active() else (getattr(t, "orchestrator", "COMPOSE") or "COMPOSE"),
         "owner_id": t.owner_id,
         "owner_email": resolved_email,
@@ -544,6 +551,7 @@ def orchestrate_tenant_stack(
     admin_password_hash: str = "",
     admin_name: str = "",
     replicas: Optional[int] = None,
+    maintenance_mode: bool = False,
 ) -> dict:
     compose_path = Path(TENANT_COMPOSE_PATH).resolve()
     if not compose_path.exists():
@@ -589,8 +597,10 @@ def orchestrate_tenant_stack(
     ai_cfg = get_ai_settings()
     ai_key = ai_cfg["api_key"]
     ai_model = ai_cfg["model"]
+    maint_flag = "1" if maintenance_mode else "0"
     env["GEMINI_API_KEY"] = ai_key
     env["GEMINI_MODEL"] = ai_model
+    env["MAINTENANCE_MODE"] = maint_flag
 
     # -------------------------------------------------------------------------
     # MODE 1 : ORCHESTRATION NATIVE DOCKER SWARM (docker stack / docker service)
@@ -614,6 +624,7 @@ def orchestrate_tenant_stack(
             .replace("${GEMINI_API_KEY:-}", ai_key)
             .replace("${GEMINI_MODEL:-gemini-3.5-flash-lite}", ai_model)
             .replace("${GEMINI_MODEL:-gemini-2.5-flash-lite}", ai_model)
+            .replace("${MAINTENANCE_MODE:-0}", maint_flag)
             .replace("${HTTP_PROXY:-}", env.get("HTTP_PROXY", ""))
             .replace("${HTTPS_PROXY:-}", env.get("HTTPS_PROXY", ""))
             .replace("${NO_PROXY:-}", env.get("NO_PROXY", ""))
@@ -669,20 +680,29 @@ def orchestrate_tenant_stack(
             svc_name = f"{slug}_tenant-app"
             cmd = [
                 "docker", "service", "update",
+                "-d",
                 "--force",
+                "--with-registry-auth",
                 "--image", TENANT_IMAGE,
                 "--env-add", f"GEMINI_API_KEY={ai_key}",
                 "--env-add", f"GEMINI_MODEL={ai_model}",
+                "--env-add", f"MAINTENANCE_MODE={maint_flag}",
+                "--env-add", f"ROLLING_UPDATE_TS={int(time.time())}",
                 "--update-parallelism", "1",
-                "--update-delay", "3s",
+                "--update-delay", "2s",
                 "--update-order", "start-first",
                 svc_name
             ]
             res = subprocess.run(cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
             if res.returncode != 0:
                 deploy_cmd = ["docker", "stack", "deploy", "--resolve-image=never", "-c", str(rendered_stack_path), slug]
-                subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
-                return {"executed": True, "mode": "SWARM", "command": " ".join(deploy_cmd)}
+                dep_res = subprocess.run(deploy_cmd, cwd=str(compose_path.parent), env=env, capture_output=True, text=True, timeout=180)
+                if dep_res.returncode != 0:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Erreur lors du Rolling Update : {res.stderr or dep_res.stderr or dep_res.stdout}",
+                    )
+                return {"executed": True, "mode": "SWARM_DEPLOY", "command": " ".join(deploy_cmd)}
             return {"executed": True, "mode": "SWARM", "command": " ".join(cmd)}
 
         elif action == "stop":
@@ -848,6 +868,7 @@ def on_startup():
                     conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS max_replicas INTEGER DEFAULT 4;"))
                     conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 1;"))
                     conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(30) DEFAULT 'SWARM';"))
+                    conn.execute(text("ALTER TABLE tenant_stacks ADD COLUMN IF NOT EXISTS maintenance_mode INTEGER DEFAULT 0;"))
                     conn.commit()
             except Exception:
                 pass
@@ -1531,6 +1552,164 @@ def sa_toggle_autoscale(
     return serialize_tenant(tenant)
 
 
+def notify_tenant_maintenance(tenant: TenantStack, enabled: bool, message: Optional[str] = None) -> bool:
+    """Commute instantanément le mode maintenance dans la stack d'établissement et met à jour le service Swarm si actif."""
+    payload = json.dumps({
+        "enabled": enabled,
+        "message": message,
+    }).encode("utf-8")
+
+    delivered = False
+    direct_port = 8100 + tenant.id
+    for host_candidate in [f"{tenant.slug}_tenant-app:8000", f"{tenant.slug}-app:8000", f"127.0.0.1:{direct_port}"]:
+        try:
+            req = urllib.request.Request(
+                f"http://{host_candidate}/api/internal/maintenance",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    delivered = True
+                    break
+        except Exception:
+            continue
+
+    if is_swarm_active():
+        try:
+            subprocess.run(
+                [
+                    "docker", "service", "update", "-d",
+                    "--env-add", f"MAINTENANCE_MODE={'1' if enabled else '0'}",
+                    f"{tenant.slug}_tenant-app",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            pass
+
+    return delivered
+
+
+@app.post("/api/superadmin/tenants/rolling-update-all")
+def sa_rolling_update_all_tenants(
+    current_admin: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """AGILITÉ GLOBALE : Déclenche un Rolling Update Zero-Downtime sur tous les établissements RUNNING."""
+    running_tenants = db.query(TenantStack).filter(TenantStack.status == "RUNNING").all()
+    updated = []
+    errors = []
+
+    for tenant in running_tenants:
+        owner = tenant.owner
+        try:
+            res = orchestrate_tenant_stack(
+                action="rolling_update",
+                slug=tenant.slug,
+                tenant_id=tenant.id,
+                institution_name=tenant.institution_name,
+                plan_max_users=tenant.plan_max_users,
+                admin_email=owner.email if owner else "",
+                admin_password_hash=owner.password_hash if owner else "",
+                admin_name=owner.full_name if owner else "",
+                replicas=tenant.replicas or 1,
+                maintenance_mode=bool(getattr(tenant, "maintenance_mode", 0)),
+            )
+            updated.append({"slug": tenant.slug, "details": res})
+        except Exception as exc:
+            errors.append({"slug": tenant.slug, "error": str(exc)})
+
+    record_cloud_event(
+        "AGILITY",
+        "cluster-all",
+        f"Rolling Update Global lancé par {current_admin.email} : {len(updated)} stack(s) mis à jour, {len(errors)} erreur(s).",
+        db=db,
+    )
+    return {
+        "status": "UPDATED_ALL",
+        "updated_count": len(updated),
+        "updated": updated,
+        "errors": errors,
+    }
+
+
+@app.post("/api/superadmin/tenants/maintenance-all")
+def sa_maintenance_all_tenants(
+    payload: MaintenanceRequest,
+    current_admin: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """Active ou désactive le mode maintenance sur TOUS les établissements d'un coup."""
+    tenants = db.query(TenantStack).all()
+    if payload.enabled is not None:
+        target_state = bool(payload.enabled)
+    else:
+        any_not_maint = any(not bool(getattr(t, "maintenance_mode", 0)) for t in tenants)
+        target_state = any_not_maint
+
+    notified = []
+    for tenant in tenants:
+        tenant.maintenance_mode = 1 if target_state else 0
+        if tenant.status == "RUNNING":
+            ok = notify_tenant_maintenance(tenant, target_state, payload.message)
+            notified.append({"slug": tenant.slug, "notified": ok})
+
+    db.commit()
+    state_label = "activée" if target_state else "désactivée"
+    record_cloud_event(
+        "AGILITY",
+        "cluster-all",
+        f"Maintenance globale {state_label} par {current_admin.email} sur {len(tenants)} établissement(s).",
+        db=db,
+    )
+    return {
+        "maintenance_mode": target_state,
+        "count": len(tenants),
+        "notified": notified,
+    }
+
+
+@app.post("/api/superadmin/tenants/{slug}/maintenance")
+def sa_toggle_maintenance_tenant(
+    slug: str,
+    payload: Optional[MaintenanceRequest] = None,
+    current_admin: PortalUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """Active ou désactive le mode maintenance sur un établissement spécifique."""
+    tenant = db.query(TenantStack).filter(TenantStack.slug == slug).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Stack introuvable.")
+
+    current_state = bool(getattr(tenant, "maintenance_mode", 0))
+    target_state = bool(payload.enabled) if (payload and payload.enabled is not None) else (not current_state)
+    tenant.maintenance_mode = 1 if target_state else 0
+    db.commit()
+    db.refresh(tenant)
+
+    delivered = False
+    if tenant.status == "RUNNING":
+        delivered = notify_tenant_maintenance(tenant, target_state, payload.message if payload else None)
+
+    state_label = "activée" if target_state else "levée"
+    record_cloud_event(
+        "AGILITY",
+        tenant.slug,
+        f"Maintenance {state_label} sur '{tenant.slug}' par {current_admin.email}.",
+        db=db,
+    )
+    return {
+        "slug": tenant.slug,
+        "maintenance_mode": target_state,
+        "delivered": delivered,
+        "tenant": serialize_tenant(tenant),
+    }
+
+
 @app.post("/api/superadmin/tenants/{slug}/rolling-update")
 def sa_rolling_update_tenant(
     slug: str,
@@ -1545,13 +1724,18 @@ def sa_rolling_update_tenant(
     if not tenant:
         raise HTTPException(status_code=404, detail="Stack introuvable.")
 
+    owner = tenant.owner
     res = orchestrate_tenant_stack(
         action="rolling_update",
         slug=tenant.slug,
         tenant_id=tenant.id,
         institution_name=tenant.institution_name,
         plan_max_users=tenant.plan_max_users,
+        admin_email=owner.email if owner else "",
+        admin_password_hash=owner.password_hash if owner else "",
+        admin_name=owner.full_name if owner else "",
         replicas=tenant.replicas or 1,
+        maintenance_mode=bool(getattr(tenant, "maintenance_mode", 0)),
     )
     record_cloud_event(
         "AGILITY",

@@ -121,6 +121,12 @@ class ClassAIReview(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TenantSetting(Base):
+    __tablename__ = "tenant_settings"
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=True)
+
+
 # ================= SCHÉMAS PYDANTIC =================
 class LoginRequest(BaseModel):
     email: str
@@ -143,6 +149,10 @@ class ClassActionRequest(BaseModel):
     class_name: Optional[str] = "ALL"
     force_regenerate: Optional[bool] = False
 
+class MaintenanceToggleRequest(BaseModel):
+    enabled: bool
+    message: Optional[str] = None
+
 class XAPIStatementInput(BaseModel):
     actor: Dict[str, Any]
     verb: Dict[str, Any]
@@ -151,8 +161,69 @@ class XAPIStatementInput(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+DEFAULT_ADMIN_MAINTENANCE_MESSAGE = (
+    "Opération de maintenance en cours sur cet établissement. "
+    "L'accès est temporairement suspendu pendant la mise à jour et sera rétabli d'ici quelques instants."
+)
+
+
+def get_maintenance_state(db: Optional[Session] = None) -> Tuple[bool, str]:
+    """Lit l'état du mode maintenance administratif depuis tenant_settings (partagé entre réplicas)."""
+    env_flag = os.getenv("MAINTENANCE_MODE", "0").strip() in ("1", "true", "True", "yes")
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        rows = db.query(TenantSetting).filter(TenantSetting.key.in_(["maintenance_mode", "maintenance_message"])).all()
+        cfg = {r.key: (r.value or "") for r in rows}
+        if "maintenance_mode" in cfg:
+            is_enabled = cfg["maintenance_mode"] == "1"
+        else:
+            is_enabled = env_flag
+        msg = cfg.get("maintenance_message") or DEFAULT_ADMIN_MAINTENANCE_MESSAGE
+        return is_enabled, msg
+    except Exception:
+        return env_flag, DEFAULT_ADMIN_MAINTENANCE_MESSAGE
+    finally:
+        if close_db:
+            db.close()
+
+
+def set_maintenance_state(db: Session, enabled: bool, message: Optional[str] = None):
+    TenantSetting.__table__.create(bind=engine, checkfirst=True)
+    updates = {
+        "maintenance_mode": "1" if enabled else "0",
+        "maintenance_message": (message or DEFAULT_ADMIN_MAINTENANCE_MESSAGE).strip(),
+    }
+    for k, v in updates.items():
+        row = db.query(TenantSetting).filter(TenantSetting.key == k).first()
+        if not row:
+            db.add(TenantSetting(key=k, value=v))
+        else:
+            row.value = v
+    db.commit()
+
+
 # ================= INITIALISATION DE L'APPLICATION =================
 app = FastAPI(title=f"EduPulse Stack - {INSTITUTION_NAME}")
+
+
+@app.middleware("http")
+async def maintenance_guard_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") or path.startswith("/xapi/"):
+        if path not in ("/api/health", "/api/info", "/api/internal/maintenance"):
+            is_maint, maint_msg = get_maintenance_state()
+            if is_maint:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "maintenance": True,
+                        "detail": maint_msg,
+                    },
+                )
+    return await call_next(request)
 
 
 @app.exception_handler(SQLAlchemyError)
@@ -986,11 +1057,16 @@ def get_stack_info(db: Session = Depends(get_db)):
     db_available = True
     total_users = 0
     total_statements = 0
+    is_maint, maint_msg = False, ""
     try:
         total_users = db.query(func.count(User.id)).scalar() or 0
         total_statements = db.query(func.count(XAPIStatementRecord.id)).scalar() or 0
+        is_maint, admin_maint_msg = get_maintenance_state(db)
+        if is_maint:
+            maint_msg = admin_maint_msg
     except Exception:
         db_available = False
+        maint_msg = MAINTENANCE_MESSAGE
 
     return {
         "tenant_slug": TENANT_SLUG,
@@ -1003,7 +1079,20 @@ def get_stack_info(db: Session = Depends(get_db)):
         "admin_email": ADMIN_EMAIL,
         "replica_id": socket.gethostname(),
         "db_available": db_available,
-        "maintenance_message": "" if db_available else MAINTENANCE_MESSAGE,
+        "maintenance_mode": is_maint,
+        "maintenance_message": maint_msg,
+    }
+
+
+@app.post("/api/internal/maintenance", include_in_schema=False)
+def internal_toggle_maintenance(payload: MaintenanceToggleRequest, db: Session = Depends(get_db)):
+    """Endpoint interne piloté par le Control Plane (portal-api) pour activer/désactiver la maintenance instantanément."""
+    set_maintenance_state(db, payload.enabled, payload.message)
+    is_maint, maint_msg = get_maintenance_state(db)
+    return {
+        "tenant_slug": TENANT_SLUG,
+        "maintenance_mode": is_maint,
+        "maintenance_message": maint_msg,
     }
 
 
