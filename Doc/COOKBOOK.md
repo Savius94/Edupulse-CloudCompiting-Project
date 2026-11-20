@@ -115,20 +115,100 @@ Depuis le tableau de bord **Super-Admin** du portail :
 
 ---
 
-## Recette 7 — Parcours Pédagogique & IA Anonymisée (Dans un Établissement)
+## Recette 7 — Ajouter des comptes utilisateurs (Admin d'Établissement)
 
-1. **Vue Admin École** : importer une promotion complète via **Import CSV** (modèle téléchargeable sur l'interface), sous contrôle strict du quota `MAX_USERS`.
-2. **Vue Étudiant** : saisir une note (jusqu'à 2 décimales, ex: `14.75`) → enregistrement xAPI au format `JSONB` et affichage de l'appréciation personnalisée du professeur.
-3. **Vue Enseignant** :
-   * Filtrer par **Classe**, **Matière** ou **Élève**.
-   * Activer **🔮 Projection M+1 (30j)** pour afficher les courbes d'évolution estimées en pointillés.
-   * Cliquer sur **Générer pour toute la classe** (1 seule requête groupée anonymisée `ETUD-01`, `ETUD-02`... avec écrasement des anciens conseils et calcul des notes futures estimées `/20`) ou générer pour **un seul élève**.
-   * Générer le **Bilan IA Global de la Classe**.
-   * Cliquer sur **Télécharger le Rapport PDF de la Classe** (si des conseils ou notes futures manquent, l'API les génère automatiquement avant de produire le PDF multi-pages).
+Connecté en **Admin** sur l'URL de l'établissement (`http://<slug>.edupulse.mnbll.fr`) :
+
+### Option A — Création manuelle d'un compte
+1. Dans la section **Ajouter des utilisateurs**, rester sur l'onglet **Ajout manuel**.
+2. Renseigner le nom complet, l'email, le mot de passe initial, le **rôle** (`ETUDIANT`, `ENSEIGNANT` ou `ADMIN`) et la **classe** (ex. `M1 Cloud & DevOps`).
+3. Valider : le compteur de places restantes (`MAX_USERS`) est mis à jour en temps réel.
+
+### Option B — Import groupé par fichier CSV
+1. Basculer sur l'onglet **Import CSV**.
+2. Cliquer sur **Télécharger le modèle CSV** pour obtenir le format attendu (`email,full_name,password,role,class_name`).
+3. Sélectionner votre fichier `.csv` puis cliquer sur **Importer les comptes**.
+4. L'API vérifie le quota restant avant insertion et affiche le détail des comptes créés (ou l'erreur si le quota `MAX_USERS` est dépassé).
+
+### Supprimer un compte
+* Dans le tableau **Utilisateurs enregistrés dans ce stack**, cliquer sur **Supprimer** sur la ligne concernée *(le compte **Admin Principal** est protégé contre la suppression)*.
 
 ---
 
-## Recette 8 — Dépannage Rapide (Troubleshooting)
+## Recette 8 — Saisir une note (xAPI) et suivre ses résultats (Étudiant)
+
+Connecté en **Étudiant** :
+
+1. **Consulter ses résultats** :
+   * Le haut de la page affiche la moyenne générale, les moyennes par matière et le graphique **Évolution chronologique de mes notes** (filtrable par matière via le menu déroulant).
+   * L'encadré **💬 Appréciation personnalisée de votre enseignant** affiche le dernier message publié par votre professeur *(les alertes de décrochage et conseils IA internes restent strictement invisibles pour l'étudiant)*.
+2. **Enregistrer une nouvelle note** :
+   * Dans **Enregistrer un résultat de cours**, choisir la **Matière**, le **Verbe d'action** (ex. *a complété*, *a réussi*) et saisir une note sur 20 (avec jusqu'à 2 décimales, ex. `14.75`).
+   * Valider : la trace est enregistrée au standard **ADL xAPI (`JSONB`)**, apparaît dans l'**Historique de mes Statements xAPI**, et met instantanément à jour les graphiques et indicateurs de risque côté enseignant.
+
+---
+
+## Recette 9 — Regarder la progression d'un élève ou d'une classe (Enseignant)
+
+Connecté en **Enseignant**, dans le bloc **Évolution des notes & Comparateur de progressions** :
+
+1. **Filtrer le périmètre** : utiliser les menus **Classe** et **Matière** pour cibler une promotion ou un cours précis.
+2. **Choisir le mode d'affichage** parmi les 5 vues disponibles :
+   * **Élève individuel** : sélectionner un étudiant précis dans le menu déroulant pour isoler sa courbe de notes. *(Raccourci : dans la liste des élèves en dessous, cliquer sur l'icône/bouton de focus courbe sur la ligne d'un élève pour ouvrir directement son graphique).*
+   * **Comparateur** : cocher plusieurs élèves à comparer, ou utiliser les boutons rapides **Écarts extrêmes (Major vs Décrocheur)**, **Élèves en risque**, **Tout cocher / Tout décocher**.
+   * **Tendance de classe** : visualiser la moyenne globale de la classe dans le temps.
+   * **Par matière** / **Distribution** : comparer les résultats par cours ou la répartition des notes.
+3. **Afficher la projection future (M+1)** :
+   * Cliquer sur **🔮 Projection M+1 (30j)** pour tracer en pointillés l'évolution estimée sur les 30 prochains jours (`J+7`, `J+15`, `J+22`, `J+30`).
+
+---
+
+## Recette 10 — Lancer une analyse IA du score d'un élève (ou de toute la classe)
+
+Dans le bloc **Conseils pédagogiques IA & Appréciations personnalisées** (vue **Enseignant**) :
+
+1. **Analyser un seul élève** :
+   * Sur la carte/ligne de l'élève souhaité, cliquer sur le bouton de génération IA unitaire.
+   * Le serveur envoie un prompt compact **anonymisé** (`ETUD-01`) à Gemini, reçoit la recommandation et la **note future estimée (`/20` à M+1)**, désanonymise le nom pour l'affichage professeur et **écrase** l'ancien conseil de cet élève.
+2. **Analyser tous les élèves d'un coup** :
+   * Cliquer sur **Générer pour tout le monde / toute la classe** en haut du tableau de bord.
+   * Une **requête groupée unique** (`ETUD-01`, `ETUD-02`...) est envoyée à Gemini ; les conseils et notes futures estimées sont ensuite répartis et sauvegardés pour chaque élève (écrasement des anciens conseils).
+
+---
+
+## Recette 11 — Mettre une appréciation personnalisée à un élève (Enseignant)
+
+Sur la carte/ligne d'un élève dans la vue **Enseignant** :
+
+1. Repérer le champ texte d'appréciation dédié à cet élève.
+2. Rédiger le message pédagogique (encouragements, points à travailler, convocation en tutorat...).
+3. Cliquer sur **Enregistrer / Publier l'appréciation**.
+4. Le message est immédiatement visible par l'étudiant concerné sur son propre tableau de bord, avec le nom de l'auteur et la date de mise à jour.
+
+---
+
+## Recette 12 — Générer un Bilan IA de classe & un Rapport PDF complet (Enseignant)
+
+Dans l'encadré **Bilan IA global de la classe & Génération de Rapport PDF Complet** :
+
+1. Sélectionner la **Classe** cible dans le menu déroulant (ou *Toutes les classes*).
+2. Cliquer sur **Bilan IA global de la classe** pour obtenir une synthèse collective (points forts, fragilités, moyenne future estimée de la classe et priorités d'action).
+3. Cliquer sur **Générer le Rapport PDF Complet** :
+   * Si certains élèves de la classe n'ont pas encore de conseil IA ou de note future estimée, le backend lance automatiquement les analyses IA anonymisées manquantes.
+   * Un PDF multi-pages est téléchargé avec : les KPIs actuels et projetés M+1, le bilan IA de la classe, le graphique de trajectoire, les statistiques par matière, ainsi que la note future estimée et le conseil IA personnalisé de chaque élève.
+
+---
+
+## Recette 13 — Basculer rapidement de rôle en démonstration (`⚙️`)
+
+Pour enchaîner une démonstration sans ressaisir d'identifiants :
+
+* **Sur le Portail (`edupulse.mnbll.fr`)** : cliquer sur **`⚙️`** en haut à droite pour basculer entre **Client Démo** et **Super-Admin**.
+* **Dans un Établissement (`<slug>.edupulse.mnbll.fr`)** : cliquer sur **`⚙️`** en haut à droite pour basculer instantanément entre **Étudiant**, **Enseignant** et **Admin d'Établissement**.
+
+---
+
+## Recette 14 — Dépannage Rapide (Troubleshooting)
 
 * **Vérifier l'état des réplicas d'une école qui ne répond pas** :
   ```bash
