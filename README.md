@@ -1,8 +1,16 @@
-# README — EduPulse (Cloud Learning SaaS Multi-Tenant)
+# EduPulse — Cloud Learning SaaS Multi-Tenant
 
-EduPulse est une plateforme SaaS multi-tenant en silo dédiée à la centralisation des traces d'apprentissage (xAPI), à l'évaluation analytique des résultats scolaires et à la détection précoce des élèves en difficulté. Ce document sert de référence d'architecture et de guide opérationnel pour les développeurs et les mainteneurs du projet.
+**Dépôt GitHub :** [https://github.com/Savius94/Edupulse-CloudCompiting-Project](https://github.com/Savius94/Edupulse-CloudCompiting-Project)  
+**Cloner le projet :** `git clone https://github.com/Savius94/Edupulse-CloudCompiting-Project.git`  
+**Application en ligne :** [https://edupulse.mnbll.fr/](https://edupulse.mnbll.fr/)
 
-> 📋 **Liste détaillée des fonctionnalités (User & Fonctionnel)** : voir [FONCTIONNALITES.md](FONCTIONNALITES.md).
+EduPulse est une plateforme SaaS multi-tenant en silo dédiée à la centralisation des traces d'apprentissage (xAPI), à l'évaluation analytique des résultats scolaires, au coaching pédagogique IA anonymisé et à la détection précoce des élèves en difficulté. Ce document sert de référence d'architecture et de guide opérationnel pour le projet.
+
+### 📚 Documentation Complète
+* **[📋 Liste des Fonctionnalités (User & Fonctionnel)](Doc/FONCTIONNALITES.md)**
+* **[📖 Cookbook Opérationnel (Déploiement, Exploitations & Recettes User)](Doc/COOKBOOK.md)**
+* **[🗄️ Schéma des Bases de Données (Diagrammes ER)](Doc/SCHEMA_BDD.md)**
+* **[🏗️ Architecture & Plan du Projet](Doc/architecture_et_plan_du_projet_saas.md)**
 
 ---
 
@@ -107,10 +115,12 @@ La plateforme supporte nativement **Docker Swarm** (`docker stack deploy`, `dock
 ## 2. Arborescence du Projet
 
 ```text
-V2/
+Edupulse-CloudCompiting-Project/
+├── README.md                               # Documentation principale (racine GitHub)
 ├── Doc/
-│   ├── README.md                           # Architecture globale et guide opérationnel
 │   ├── FONCTIONNALITES.md                  # Liste simple des fonctionnalités (User & Fonctionnel)
+│   ├── COOKBOOK.md                         # Recettes pratiques (Cluster & Parcours Utilisateur)
+│   ├── SCHEMA_BDD.md                       # Schémas ER et dictionnaire des tables PostgreSQL
 │   └── architecture_et_plan_du_projet_saas.md
 ├── cloud-learning-saas/
 │   ├── docker-compose.yml                  # Socle Swarm : Registry + Socket-Proxy + Portal-DB + Traefik + Portal-API

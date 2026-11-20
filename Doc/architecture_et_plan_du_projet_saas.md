@@ -1,7 +1,7 @@
 # Document d'Architecture et Plan du Projet Cloud Computing
 ## Plateforme SaaS Multi-Tenant d'Analyse de l'Apprentissage (xAPI, Docker Swarm & IA Anonymisée)
 
-> 📚 **Documents associés** : [README.md](README.md) • [FONCTIONNALITES.md](FONCTIONNALITES.md) • [SCHEMA_BDD.md](SCHEMA_BDD.md) • [COOKBOOK.md](COOKBOOK.md)
+> 📚 **Documents associés** : [README.md](../README.md) • [FONCTIONNALITES.md](FONCTIONNALITES.md) • [SCHEMA_BDD.md](SCHEMA_BDD.md) • [COOKBOOK.md](COOKBOOK.md)
 
 ---
 
@@ -44,9 +44,9 @@ Les technologies ont été sélectionnées pour minimiser l'empreinte mémoire t
 ## 3. Arborescence Complète du Projet
 
 ```text
-V2/
+Edupulse-CloudCompiting-Project/
+├── README.md                                  # Architecture Swarm détaillée & guide opérationnel (racine GitHub)
 ├── Doc/
-│   ├── README.md                              # Architecture Swarm détaillée & guide opérationnel
 │   ├── FONCTIONNALITES.md                     # Liste des fonctionnalités (User & Fonctionnel)
 │   ├── SCHEMA_BDD.md                          # Diagrammes ER et dictionnaire des tables SQL
 │   ├── COOKBOOK.md                            # Recettes pratiques de déploiement & exploitation
