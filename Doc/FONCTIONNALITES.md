@@ -13,6 +13,7 @@ Ce document recense de manière simple et chronologique toutes les fonctionnalit
 ### 1.2 Création & Provisionnement d'un Établissement
 * **Niveau User** : Le client renseigne le nom de son école, choisit un sous-domaine (`slug`) et un forfait (`200`, `500` ou `1000` utilisateurs max). En quelques secondes, son espace dédié est prêt et accessible via `<slug>.edupulse.mnbll.fr`. *(Astuce : un nom commençant par `demo` ou `démo` pré-remplit l'école avec des données de test).*
 * **Niveau Fonctionnel** : `POST /api/tenants` enregistre l'école dans `tenant_stacks`, puis `orchestrate_tenant_stack()` génère un descripteur Swarm avec les variables (`TENANT_SLUG`, `MAX_USERS`, `ADMIN_PASSWORD_HASH`, `GEMINI_API_KEY`, etc.) et lance `docker stack deploy` via `docker-socket-proxy` :
+  * Plus le forfait est élevé plsu les nombre de réplicat max est élevé 200 = 1-3, 500 = 2-5, 1000 = 2-8.
   * La base `<slug>_tenant-db` est placée sur le **Manager** (persistance des données).
   * L'application `<slug>_tenant-app` est répartie sur les **2 Workers** et exposée automatiquement par **Traefik** via ses labels Docker.
 
