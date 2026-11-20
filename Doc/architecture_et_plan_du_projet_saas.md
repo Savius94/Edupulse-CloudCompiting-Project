@@ -1,127 +1,115 @@
 # Document d'Architecture et Plan du Projet Cloud Computing
-## Plateforme SaaS Multi-Tenant d'Analyse de l'Apprentissage (xAPI & Détection du Décrochage)
+## Plateforme SaaS Multi-Tenant d'Analyse de l'Apprentissage (xAPI, Docker Swarm & IA Anonymisée)
+
+> 📚 **Documents associés** : [README.md](README.md) • [FONCTIONNALITES.md](FONCTIONNALITES.md) • [SCHEMA_BDD.md](SCHEMA_BDD.md) • [COOKBOOK.md](COOKBOOK.md)
 
 ---
 
 ## 1. Vision et Objectifs du Projet
 
-Ce projet consiste à concevoir et déployer une plateforme **SaaS (Software as a Service) Multi-Tenant en silo** destinée aux établissements d'enseignement. Son objectif métier est de **centraliser les traces d'apprentissage au standard xAPI**, d'évaluer automatiquement la progression des apprenants et d'**identifier les élèves en difficulté** afin de proposer des solutions de remédiation aux enseignants.
+Ce projet consiste à concevoir et déployer une plateforme **SaaS (Software as a Service) Multi-Tenant en silo** destinée aux établissements d'enseignement. Son objectif métier est de **centraliser les traces d'apprentissage au standard xAPI**, d'évaluer automatiquement la progression des apprenants, d'**identifier les élèves en difficulté** et d'assister les enseignants grâce à une **IA pédagogique anonymisée**, des **courbes de projection à M+1** et des **rapports PDF par classe**.
 
-L'architecture est structurée en **deux niveaux d'isolation (2-Tier Multi-Tenancy)** optimisés pour fonctionner sur une machine virtuelle (VM) aux ressources limitées :
+L'architecture est structurée en **deux niveaux d'isolation (2-Tier Multi-Tenancy)** orchestrés sur un cluster **Docker Swarm de 3 VMs** (2 Go RAM / 1 vCPU chacune, interconnectées via **Tailscale**) :
 
 1. **Niveau 1 — Le Control Plane (Portail Public : `edupulse.mnbll.fr`)** :
-   * **Espace Administrateur d'Abonnement (Client)** : Permet à un représentant d'école de créer un compte, puis de provisionner un ou plusieurs établissements en choisissant un nom d'établissement, un sous-domaine DNS (`school1.edupulse.mnbll.fr`) et un plan de capacité (`200`, `500` ou `1000` utilisateurs maximum).
-   * **Espace Super-Administrateur Global (Cloud Operator)** : Permet de surveiller en temps réel les ressources de la VM (CPU, RAM, Disque), de superviser tous les stacks Docker déployés, de modifier les quotas, et d'ajouter, suspendre ou supprimer des stacks et des comptes clients.
+   * **Espace Administrateur d'Abonnement (Client)** : Permet à un responsable d'école de créer un compte, de provisionner un ou plusieurs établissements (nom, sous-domaine `<slug>.edupulse.mnbll.fr`, forfait `200`, `500` ou `1000` utilisateurs max) et de faire évoluer son forfait à chaud (*Upgrade / Downgrade*).
+   * **Espace Super-Administrateur Global (Cloud Operator)** : Permet de superviser les ressources du cluster (`psutil` + Docker Swarm), de gérer les stacks déployés (scaling manuel `- / +`, auto-scaling dynamique avec simulateur de charge, *Rolling Updates* unitaires/globaux sans coupure, mode Maintenance unitaire/global) et de configurer la clé API IA de manière centralisée (Manager → Workers).
 2. **Niveau 2 — Le Data/App Plane (Stack Établissement Isolé : `<slug>.edupulse.mnbll.fr`)** :
-   * Chaque établissement dispose de sa propre pile applicative Docker isolée (1 conteneur API/Frontend + 1 conteneur PostgreSQL dédié).
-   * Le compte ayant créé l'établissement sur le portail devient automatiquement le **compte Administrateur principal** de ce stack.
-   * Le stack expose trois vues métier : **Vue Administrateur d'école** (gestion des comptes et des rôles sous contrôle du quota), **Vue Étudiant** (saisie de notes générant des statements xAPI) et **Vue Enseignant** (tableau de bord analytique, scores de risque et recommandations pédagogiques).
+   * Chaque établissement dispose de sa propre pile applicative Docker Swarm isolée : réplicas `tenant-app` répartis sur les **Workers** + conteneur PostgreSQL `tenant-db` dédié avec volume persistant sur le **Manager** et réseau overlay privé `<slug>_tenant-internal-net`.
+   * Le stack expose trois vues métier : **Vue Administrateur d'école** (gestion des comptes, import CSV sous contrôle du quota `MAX_USERS`), **Vue Étudiant** (saisie de notes générant des statements xAPI, graphique filtrable, appréciation de l'enseignant) et **Vue Enseignant** (détection du décrochage, coaching IA anonymisé, bilan de classe, projection M+1 et export PDF).
+3. **Écosystème Externe Simulé (`external-apps/`)** :
+   * Une **4ᵉ VM séparée** héberge **Evalio** et **Notara** (applications de simulation d'examens), sans aucun lien direct avec EduPulse, afin de simuler un environnement multi-applications externe.
 
 ---
 
 ## 2. Pile Technologique (Tech Stack)
 
-Les technologies ont été sélectionnées pour minimiser l'empreinte mémoire ($< 90\text{ Mo}$ de RAM par établissement) tout en respectant les standards industriels du Cloud Computing :
+Les technologies ont été sélectionnées pour minimiser l'empreinte mémoire tout en exploitant les standards industriels du Cloud Computing et de l'orchestration :
 
 | Couche | Technologie / Image Docker | Rôle et Justification |
 | :--- | :--- | :--- |
-| **DNS & Réseau** | Enregistrements DNS `A` + Wildcard | `edupulse.mnbll.fr` et `*.edupulse.mnbll.fr` pointent vers l'IP publique de la VM. |
-| **Reverse Proxy** | **Traefik v3** (`traefik:v3`) | Découverte automatique des nouveaux stacks via le socket Docker et routage par sous-domaine (`Host()`). Compatible Docker 29+ (API 1.44+). |
-| **Backend Portail** | **Python 3.11 + FastAPI** (`python:3.11-slim`) | API REST du portail, monitoring système (`psutil`) et orchestration Docker (`docker compose` / SDK). |
-| **BDD Portail** | **PostgreSQL 16 Alpine** (`postgres:16-alpine`) | Stocke les comptes du portail (`SUPER_ADMIN`, `SUBSCRIPTION_ADMIN`) et le registre des stacks déployés. |
-| **Backend Stack École** | **Python 3.11 + FastAPI** (`python:3.11-slim`) | Serveur métier de l'école, endpoint LRS xAPI (`/xapi/statements`), contrôle du quota et moteur d'analyse. |
-| **BDD & LRS École** | **PostgreSQL 16 Alpine** (`postgres:16-alpine`) | 1 conteneur SQL par stack : tables relationnelles (`users`, `courses`) + stockage natif `JSONB` pour les statements xAPI. |
-| **Frontend (Portail & École)** | **HTML5 / Tailwind CSS / Vanilla JS (SPA)** | Interfaces réactives servies directement par FastAPI sans surcharge Node.js en production. |
-| **Sécurité & Auth** | **JWT (PyJWT) + Bcrypt (`passlib`)** | Authentification stateless par jeton et partage du hash de mot de passe lors de l'initialisation du stack. |
+| **DNS & Réseau** | DNS `A` + Wildcard (`*.edupulse.mnbll.fr`) + **Tailscale** | Interconnexion privée (`100.x.x.x`) entre le Manager, les 2 Workers et le VPS frontal (Caddy HA). |
+| **Orchestration** | **Docker Swarm** (`deploy` / `service` / `stack`) + repli Compose | Répartition des services entre **1 Manager** (BDDs, Registry, Socket-Proxy, Monitoring) et **2 Workers** (Traefik, `portal-api`, `tenant-app`). |
+| **Registry & Sécurité API** | `registry:2` + `tecnativa/docker-socket-proxy` | Diffusion des images sur les Workers et exposition sécurisée du socket Docker du Manager. |
+| **Reverse Proxy** | **Traefik v3** (`traefik:v3`, mode `global`) | Découverte automatique des stacks Swarm via labels Docker et routage par sous-domaine (`Host()`). |
+| **Backend Portail** | **Python 3.11 + FastAPI** | API REST du portail, auth JWT, monitoring (`psutil`), auto-scaling et pilotage Swarm. |
+| **Backend Stack École** | **Python 3.11 + FastAPI** | Serveur métier de l'école, LRS xAPI (`/xapi/statements`), analytics, anonymisation IA (`ETUD-XX`) et préparation des rapports PDF. |
+| **Bases de Données** | **PostgreSQL 16 Alpine** (`postgres:16-alpine`) | `portal-db` pour le Control Plane + 1 base `<slug>_tenant-db` isolée par école avec stockage natif `JSONB`. |
+| **IA Générative** | **Google Gemini API** (`gemini-3.5-flash-lite`) | Coaching pédagogique (unitaire & groupé), estimation de note future à M+1 et bilan global de classe, avec repli local si absent. |
+| **Observabilité** | **Grafana + Loki + Promtail** | Collecte centralisée des logs Docker sur le Manager et les 2 Workers. |
+| **Frontend** | **HTML5 / Tailwind CSS / Vanilla JS / Chart.js / jsPDF** | SPA légères sans build Node.js en production, graphiques interactifs et génération PDF côté client. |
 
 ---
 
 ## 3. Arborescence Complète du Projet
 
 ```text
-cloud-learning-saas/
-├── docker-compose.yml                 # Socle principal : Traefik + Portail API + Portail SQL
-├── .env                               # Variables globales (Domaine, identifiants Super-Admin)
-├── ARCHITECTURE_ET_PLAN_PROJET.md     # Documentation technique du projet
-│
-├── portal/                            # NIVEAU 1 : CONTROL PLANE (edupulse.mnbll.fr)
-│   ├── Dockerfile                     # Image Python + Docker CLI pour orchestrer les stacks
-│   ├── requirements.txt               # fastapi, uvicorn, sqlalchemy, psycopg2-binary, psutil...
-│   ├── main.py                        # API FastAPI : Auth, Super-Admin, VM Stats & Provisioning
-│   └── static/
-│       └── index.html                 # Interface Web du Portail (Accueil, Espace Client, Super-Admin)
-│
-└── tenant-stack/                      # NIVEAU 2 : TEMPLATE DE STACK ÉTABLISSEMENT (<slug>.edupulse.mnbll.fr)
-    ├── docker-compose.tenant.yml      # Modèle instancié par école (school1-app + school1-db)
-    ├── Dockerfile                     # Image Python de l'application établissement
-    ├── requirements.txt               # Dépendances de l'application école
-    ├── main.py                        # API École : Auto-init Admin, Quota MAX_USERS, LRS xAPI, Analyse
-    └── static/
-        └── index.html                 # Interface Web École (Vues Admin, Enseignant, Étudiant)
+V2/
+├── Doc/
+│   ├── README.md                              # Architecture Swarm détaillée & guide opérationnel
+│   ├── FONCTIONNALITES.md                     # Liste des fonctionnalités (User & Fonctionnel)
+│   ├── SCHEMA_BDD.md                          # Diagrammes ER et dictionnaire des tables SQL
+│   ├── COOKBOOK.md                            # Recettes pratiques de déploiement & exploitation
+│   └── architecture_et_plan_du_projet_saas.md # Ce document
+├── cloud-learning-saas/
+│   ├── docker-compose.yml                     # Socle Swarm : Registry, Socket-Proxy, Portal-DB, Traefik, Portal-API
+│   ├── deploy-swarm.sh                        # Build, push Registry et déploiement Swarm
+│   ├── Caddyfile.vps.example                  # Configuration Haute Disponibilité du VPS relais
+│   ├── portal/                                # NIVEAU 1 : CONTROL PLANE
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   ├── main.py                            # API Portail : Auth, Super-Admin, Auto-Scaling, Rolling Update, Maintenance
+│   │   └── static/index.html                  # Interface Web du Portail
+│   └── tenant-stack/                          # NIVEAU 2 : STACK ÉTABLISSEMENT ISOLÉ
+│       ├── docker-compose.tenant.yml          # Modèle Swarm/Compose instancié par école
+│       ├── Dockerfile
+│       ├── requirements.txt
+│       ├── demo_data.py                       # Jeu de données de démonstration
+│       ├── main.py                            # API École : Quota, LRS xAPI, Analytique, IA anonymisée, PDF
+│       └── static/index.html                  # Interface Web École (Admin, Enseignant, Étudiant)
+├── monitoring/                                # Stack Grafana + Loki + Promtail (Local & Swarm)
+└── external-apps/                             # VM externe séparée : Evalio & Notara
 ```
 
 ---
 
-## 4. Modèle de Données SQL (Double Niveau)
+## 4. Modèle de Données SQL (Double Niveau — Synthèse)
+
+*(Voir le schéma complet avec diagrammes ER dans [SCHEMA_BDD.md](SCHEMA_BDD.md)).*
 
 ### 4.1. Base SQL du Portail Public (`portal-db`)
+1. **`portal_users`** : `id`, `email` (Unique), `full_name`, `password_hash` (Bcrypt), `role` (`SUPER_ADMIN` | `SUBSCRIPTION_ADMIN`), `created_at`.
+2. **`tenant_stacks`** : `id`, `institution_name`, `slug` (Unique), `domain` (Unique), `plan_max_users` (`200` | `500` | `1000`), `status` (`RUNNING` | `STOPPED`), `replicas`, `min_replicas`, `max_replicas`, `autoscale_enabled`, `orchestrator`, `maintenance_mode`, `owner_id` (FK $\rightarrow$ `portal_users.id`), `created_at`.
+3. **`cloud_settings`** & **`cloud_events`** : Paramètres globaux (`gemini_api_key`, `gemini_model`, `simulated_cpu_override`) et journal des événements Swarm.
 
-1. **Table `portal_users`** :
-   * `id` (PK, Integer)
-   * `email` (String, Unique)
-   * `full_name` (String)
-   * `password_hash` (String — Hash Bcrypt réutilisé pour initialiser le compte admin du stack)
-   * `role` (String : `'SUPER_ADMIN'` ou `'SUBSCRIPTION_ADMIN'`)
-   * `created_at` (DateTime)
-
-2. **Table `tenant_stacks`** :
-   * `id` (PK, Integer)
-   * `institution_name` (String — ex: *"Lycée Jean Moulin"*)
-   * `slug` (String, Unique — ex: `school1`)
-   * `domain` (String — ex: `school1.edupulse.mnbll.fr`)
-   * `plan_max_users` (Integer : `200`, `500` ou `1000`)
-   * `status` (String : `'RUNNING'`, `'STOPPED'`, `'ERROR'`)
-   * `owner_id` (FK $\rightarrow$ `portal_users.id`)
-   * `created_at` (DateTime)
-
-### 4.2. Base SQL Dédiée par Stack Établissement (`<slug>-db`)
-
-1. **Table `users`** (Soumise à la contrainte $\text{COUNT}(*) < \text{MAX\_USERS}$) :
-   * `id` (PK), `email` (Unique), `full_name`, `password_hash`, `role` (`'ADMIN'`, `'ENSEIGNANT'`, `'ETUDIANT'`), `class_name` (String — promotion/classe), `created_at`.
-2. **Table `xapi_statements` (LRS intégré)** :
-   * `id` (UUID), `student_id` (FK), `course_name` (String), `verb` (String — ex: `http://adlnet.gov/expapi/verbs/completed`), `score_raw` (Float sur $20$), `score_scaled` (Float entre $0$ et $1$), `raw_statement` (**`JSONB`** — Statement xAPI complet), `timestamp` (DateTime).
-3. **Table `student_analytics`** :
-   * `student_id` (PK), `average_score` (Float), `trend_slope` (Float), `risk_level` (`'CRITIQUE'`, `'MODERE'`, `'FAIBLE'`), `recommended_solution` (Text).
+### 4.2. Base SQL Dédiée par Stack Établissement (`<slug>_tenant-db`)
+1. **`users`** (soumise à `COUNT(*) < MAX_USERS`) : `id`, `email` (Unique), `full_name`, `password_hash`, `role` (`ADMIN` | `ENSEIGNANT` | `ETUDIANT`), `class_name`, `created_at`.
+2. **`xapi_statements` (LRS intégré)** : `id`, `statement_uuid` (Unique), `student_id` (FK), `course_name`, `verb`, `score_raw` (`/20`), `score_max`, `score_scaled`, `statement_json` (**`JSONB`**), `timestamp`.
+3. **`student_alerts`** : `id`, `student_id` (Unique FK), `average_score`, `recent_trend`, `statements_count`, `risk_level` (`CRITIQUE` | `VIGILANCE` | `STABLE`), `weakest_course`, `estimated_future_score`, `recommendation` (conseil IA désanonymisé), `ai_prompt` (anonymisé `ETUD-XX`), `ai_raw_response`, `teacher_appreciation` (affiché côté étudiant), `appreciation_author`, `updated_at`.
+4. **`class_ai_reviews`** & **`tenant_settings`** : Bilans IA globaux par classe et état du mode maintenance local.
 
 ---
 
-## 5. Formule d'Évaluation Analytique et Empreinte Mémoire
+## 5. Dimensionnement, Forfaits & Évaluation Analytique
 
-### 5.1. Dimensionnement RAM de la VM
-La consommation mémoire totale $M_{\text{totale}}$ (en Mo) sur la machine virtuelle pour $N$ établissements actifs suit l'équation :
+### 5.1. Dimensionnement des Forfaits & Contraintes Swarm
+Chaque VM du cluster disposant de **2 Go de RAM / 1 vCPU**, les limites de ressources par réplica `tenant-app` sont calibrées selon le forfait souscrit (`PLAN_SCALING_RULES` dans `portal/main.py`) :
 
-$$M_{\text{totale}} = M_{\text{OS}} + M_{\text{Traefik}} + M_{\text{Portail}} + \sum_{i=1}^{N} \left( M_{\text{App}, i} + M_{\text{SQL}, i} \right)$$
+| Forfait | Quota `MAX_USERS` | Réplicas initiaux | Plage Auto-Scale | Limite CPU / réplica | Limite RAM / réplica |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Essentiel** | 200 | 2 | 1 ↔ 3 | `0.35` vCPU | `200M` |
+| **Campus** | 500 | 2 | 2 ↔ 5 | `0.45` vCPU | `256M` |
+| **Académie** | 1 000 | 3 | 2 ↔ 8 | `0.55` vCPU | `320M` |
 
-Avec des images Alpine et Slim ($M_{\text{App}} \approx 48\text{ Mo}$ et $M_{\text{SQL}} \approx 37\text{ Mo}$), chaque nouveau stack ne consomme qu'environ $85\text{ Mo}$, permettant de faire tourner jusqu'à $15$ stacks sur une VM de $2\text{ Go}$ de RAM.
-
-### 5.2. Algorithme de détection des élèves en difficulté
-À chaque réception d'un Statement xAPI, le moteur Python calcule un **Indice de Risque de Décrochage** $R \in [0, 100]$ combinant la moyenne générale $\bar{x}$ (sur $20$), l'écart entre la dernière note $x_n$ et la moyenne, et le taux de réussite :
-
-$$R = \min\left(100, \max\left(0, \left(1 - \frac{\bar{x}}{20}\right) \times 70 + \max\left(0, \frac{\bar{x} - x_n}{20}\right) \times 30 \right)\right)$$
-
-* Si $\bar{x} < 8/20$ ou $R \ge 65$ $\rightarrow$ **Risque Critique** : *Tutorat individuel prioritaire et reprise des fondamentaux*.
-* Si $8 \le \bar{x} < 11/20$ ou $40 \le R < 65$ $\rightarrow$ **Risque Modéré** : *Exercices de remédiation ciblés et quiz d'auto-évaluation*.
-* Si $\bar{x} \ge 11/20$ et $R < 40$ $\rightarrow$ **Suivi Normal** : *Progression régulière, maintien du rythme d'apprentissage*.
+### 5.2. Détection du Décrochage, Anonymisation IA & Projection M+1
+À chaque insertion d'un statement xAPI, `recompute_student_analytics()` met à jour la moyenne générale, la pente d'évolution récente (`recent_trend`), la matière la plus fragile et le niveau de risque (`CRITIQUE`, `VIGILANCE`, `STABLE`).
+* **Confidentialité IA** : Avant tout appel externe à Gemini, les identités sont remplacées par des pseudonymes (`ETUD-01`, `ETUD-02`...) ; la réponse est ensuite personnalisée localement via `deanonymize_text()`.
+* **Prévisions M+1** : L'IA (ou le moteur de repli) estime une note future à 30 jours (`estimated_future_score`) et alimente la courbe de projection (`J+7`, `J+15`, `J+22`, `J+30`) ainsi que les rapports PDF complets par classe.
 
 ---
 
-## 6. Plan de Réalisation par Étapes
+## 6. État d'Avancement (Plan Réalisé)
 
-* **Étape 1 (Réalisée ci-dessous) — Le Portail d'Accueil & Control Plane** :
-  * Configuration de Traefik et de la base PostgreSQL du portail (`docker-compose.yml`).
-  * Backend FastAPI du portail (`portal/main.py`) avec création automatique du `SUPER_ADMIN`, authentification JWT, monitoring VM (`psutil` + Docker) et orchestration `docker compose -p <slug>`.
-  * Interface Web complète du portail (`portal/static/index.html`) incluant la page d'accueil, l'espace Client (création de stack avec plan `200`/`500`/`1000`) et le Dashboard Super-Admin.
-* **Étape 2 (Prochaine étape) — Le Template de Stack Établissement** :
-  * Fichier `tenant-stack/docker-compose.tenant.yml`.
-  * Backend FastAPI de l'école (auto-création du compte Admin initial, route `/xapi/statements`, contrôle du quota `MAX_USERS`, calcul des élèves en difficulté).
-  * Interface Web de l'école avec ses 3 vues (Étudiant, Enseignant, Administrateur).
+* **Étape 1 (Réalisée) — Portail d'Accueil & Control Plane** : Socle `docker-compose.yml`, API `portal/main.py` (auth JWT, monitoring `psutil`, forfaits, auto-scaling, rolling update unitaire/global, maintenance unitaire/globale, configuration IA centralisée) et interface `portal/static/index.html`.
+* **Étape 2 (Réalisée) — Template de Stack Établissement** : `tenant-stack/docker-compose.tenant.yml`, API `tenant-stack/main.py` (LRS xAPI `JSONB`, import CSV, quotas, analytics, IA anonymisée, appréciations, projection M+1, préparation PDF), jeu de démo `demo_data.py` et interface `tenant-stack/static/index.html`.
+* **Étape 3 (Réalisée) — Cluster Docker Swarm, Monitoring & Haute Disponibilité** : Déploiement multi-VMs (1 Manager + 2 Workers via Tailscale, Registry privé, `docker-socket-proxy`, `deploy-swarm.sh`), centralisation des logs (`monitoring/` avec Grafana, Loki, Promtail) et apps externes simulées (`external-apps/` : Evalio & Notara).
